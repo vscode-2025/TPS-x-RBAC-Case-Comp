@@ -1,0 +1,16 @@
+.DS_Store
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+
+# Notebooks (keep analysis out of deploy commits)
+*.ipynb
+
+# Large local data artifacts in this folder layout
+Major_Crime_Indicators.csv
+Festivals and events json feed.json
+Complete GTFS/
+data/processed/
