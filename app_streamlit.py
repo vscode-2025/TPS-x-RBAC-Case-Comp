@@ -105,9 +105,13 @@ def _load_events_json(path: str | Path) -> tuple[set[pd.Timestamp], pd.DataFrame
 
     # Try to load JSON with comprehensive error handling
     try:
-        # Check if file is empty
-        if Path(path).stat().st_size == 0:
-            return set(), pd.DataFrame()
+        # Check if file is empty (with error handling)
+        try:
+            if Path(path).stat().st_size == 0:
+                return set(), pd.DataFrame()
+        except (OSError, IOError, Exception):
+            # If we can't check file size, continue anyway
+            pass
         
         with open(path, "r", encoding="utf-8") as f:
             # Check first line for Git LFS pointer
@@ -257,7 +261,14 @@ def load_data(
         )
 
     agg = aggregate(linked, freq=freq)
-    event_days, event_points = _load_events_json(events_path) if events_path else (set(), pd.DataFrame())
+    # Load events data with extra safety - never crash if events file is invalid
+    event_days, event_points = set(), pd.DataFrame()
+    if events_path:
+        try:
+            event_days, event_points = _load_events_json(events_path)
+        except Exception:
+            # If anything goes wrong loading events, just skip it
+            event_days, event_points = set(), pd.DataFrame()
     if event_days:
         linked["date"] = linked["crime_dt"].dt.date
         linked["label"] = np.where(linked["date"].isin(event_days), "Event day", "Normal day")
