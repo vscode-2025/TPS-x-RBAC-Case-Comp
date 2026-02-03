@@ -94,6 +94,30 @@ def _load_csv_from_uploader(file) -> pd.DataFrame:
         return pd.read_csv(buffer, sep="\t")
 
 
+def _is_valid_json_file(path: str | Path) -> bool:
+    """Quick check if file exists and appears to be valid JSON (not LFS pointer, not empty)."""
+    if not path or not Path(path).exists():
+        return False
+    try:
+        if Path(path).stat().st_size == 0:
+            return False
+        with open(path, "r", encoding="utf-8") as f:
+            first_line = f.readline().strip()
+            if first_line == "version https://git-lfs.github.com/spec/v1":
+                return False
+            # Try to parse first few characters as JSON
+            f.seek(0)
+            content = f.read(100)
+            if not content.strip():
+                return False
+            # Quick JSON validation - check if it starts with { or [
+            if not (content.strip().startswith("{") or content.strip().startswith("[")):
+                return False
+    except Exception:
+        return False
+    return True
+
+
 def _load_events_json(path: str | Path) -> tuple[set[pd.Timestamp], pd.DataFrame]:
     """
     Flatten the City events feed into:
@@ -101,6 +125,10 @@ def _load_events_json(path: str | Path) -> tuple[set[pd.Timestamp], pd.DataFrame
     - a dataframe of point events with lat/lon (when present) for optional map overlay
     """
     if not path or not Path(path).exists():
+        return set(), pd.DataFrame()
+    
+    # Pre-check: if file doesn't look like valid JSON, skip it
+    if not _is_valid_json_file(path):
         return set(), pd.DataFrame()
 
     # Try to load JSON with comprehensive error handling
@@ -538,7 +566,7 @@ def main():
                             "Add it to the repo or upload below (uncheck Use repo defaults)."
                         )
             
-            # Check events file - try multiple locations, but don't show warnings if missing
+            # Check events file - try multiple locations, but validate JSON before using
             # Events file is optional - if it doesn't exist or is invalid, app continues without it
             if events_path is None or not Path(events_path).exists():
                 alt_events_paths = [
@@ -552,6 +580,10 @@ def main():
                 # Silently skip if events file not found - it's optional
                 if events_path is None or not Path(events_path).exists():
                     events_path = None
+            
+            # Validate JSON before setting events_path - if invalid, set to None
+            if events_path and not _is_valid_json_file(events_path):
+                events_path = None
             
             if stops_path is None or crime_path is None:
                 stop_times_path = None
