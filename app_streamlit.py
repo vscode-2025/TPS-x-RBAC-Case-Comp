@@ -100,16 +100,23 @@ def _load_events_json(path: str | Path) -> tuple[set[pd.Timestamp], pd.DataFrame
     - a set of event dates (date only) for labeling crimes as event-day
     - a dataframe of point events with lat/lon (when present) for optional map overlay
     """
-    if not path or not Path(path).exists():
+    # Return empty data if path is invalid - never crash
+    if not path:
         return set(), pd.DataFrame()
     
-    # Check if file is empty
     try:
-        if Path(path).stat().st_size == 0:
+        path_obj = Path(path)
+        if not path_obj.exists():
+            return set(), pd.DataFrame()
+        
+        # Check if file is empty
+        if path_obj.stat().st_size == 0:
             return set(), pd.DataFrame()
     except Exception:
-        pass
+        # If we can't check the file, return empty data
+        return set(), pd.DataFrame()
 
+    # Try to load and parse JSON with comprehensive error handling
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read().strip()
@@ -118,8 +125,14 @@ def _load_events_json(path: str | Path) -> tuple[set[pd.Timestamp], pd.DataFrame
                 return set(), pd.DataFrame()
             # Try to parse JSON
             raw = json.loads(content)
-    except (json.JSONDecodeError, ValueError, Exception):
-        # If JSON is invalid, return empty data - app continues without events
+    except json.JSONDecodeError:
+        # Invalid JSON format - return empty data
+        return set(), pd.DataFrame()
+    except ValueError:
+        # Invalid value - return empty data
+        return set(), pd.DataFrame()
+    except Exception:
+        # Any other error (IOError, OSError, etc.) - return empty data
         return set(), pd.DataFrame()
     
     try:
