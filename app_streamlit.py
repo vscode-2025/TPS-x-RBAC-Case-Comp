@@ -487,6 +487,23 @@ def main():
                             f"`Major_Crime_Indicators.csv.gz`, `data/Major_Crime_Indicators.csv`, or `Major_Crime_Indicators.csv`. "
                             "Add it to the repo or upload below (uncheck Use repo defaults)."
                         )
+            
+            # Check events file - try multiple locations
+            if events_path is None or not Path(events_path).exists():
+                alt_events_paths = [
+                    "Festivals and events json feed.json",
+                    "data/Festivals and events json feed.json",
+                ]
+                for alt_events in alt_events_paths:
+                    if Path(alt_events).exists():
+                        events_path = alt_events
+                        break
+                if events_path is None or not Path(events_path).exists():
+                    st.info(
+                        f"Events file not found at `{default_events}`. Event vs Normal Day comparison will not be available. "
+                        "Upload the events JSON file below (uncheck Use repo defaults) to enable this feature."
+                    )
+            
             if stops_path is None or crime_path is None:
                 stop_times_path = None
                 events_path = None
@@ -1089,6 +1106,9 @@ def main():
     # Event vs Normal comparison
     # ----------------------------
     if "label" in linked.columns:
+        # Debug: show event days count in sidebar
+        if event_days:
+            st.sidebar.caption(f"📅 Event vs Normal: {len(event_days)} event days loaded")
         st.subheader("Event vs Normal Day Comparison")
         daily = linked.copy()
         daily["date"] = daily["crime_dt"].dt.date
@@ -1171,6 +1191,21 @@ def main():
             data=avg_display.rename(columns={"nearest_stop_name": "stop_name"}).round(4).to_csv(index=False).encode("utf-8"),
             file_name="event_vs_normal.csv",
         )
+    else:
+        # Show helpful message when events data is not available
+        st.subheader("Event vs Normal Day Comparison")
+        if not event_days:
+            st.info(
+                "⚠️ Event vs Normal Day comparison is not available because no events data was loaded. "
+                "To enable this feature:\n"
+                "1. Ensure the events JSON file (`Festivals and events json feed.json`) is in the repository, or\n"
+                "2. Upload the events JSON file using the file uploader in the sidebar (uncheck 'Use repo defaults')."
+            )
+        else:
+            st.info(
+                "⚠️ Event vs Normal Day comparison is not available. "
+                "Events data was loaded but no matching crime dates were found in the selected date range."
+            )
 
 
 if __name__ == "__main__":
