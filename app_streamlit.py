@@ -368,7 +368,8 @@ def main():
 
     default_stops = "Complete GTFS/stops.txt"
     default_stop_times = "data/processed/stop_times_with_stops.csv.gz"
-    default_crime = "Major_Crime_Indicators.csv"
+    # Check root first, then data/ folder (for Streamlit Cloud compatibility)
+    default_crime = "Major_Crime_Indicators.csv" if Path("Major_Crime_Indicators.csv").exists() else "data/Major_Crime_Indicators.csv"
     default_events = "Festivals and events json feed.json"
 
     sidebar = st.sidebar
