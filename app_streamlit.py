@@ -877,7 +877,7 @@ def main():
                 help="Show only stations with selected trend classifications",
             )
         with trend_filter_col2:
-            show_trend_charts = st.checkbox("Show charts", value=True)
+            show_trend_charts = st.checkbox("Show charts", value=True, key="trend_charts_checkbox")
         
         # Apply filter
         if trend_risk_filter:
@@ -977,7 +977,7 @@ def main():
         with spike_filter_col1:
             show_only_spikes = st.checkbox("Show only stations with spikes", value=False)
         with spike_filter_col2:
-            show_spike_charts = st.checkbox("Show charts", value=True)
+            show_spike_charts = st.checkbox("Show charts", value=True, key="spike_charts_checkbox")
         
         # Apply filter
         display_spike_df = spike_df[spike_df["spike"]] if show_only_spikes else spike_df.copy()
@@ -1156,14 +1156,14 @@ def main():
                     ),
                     tooltip=[
                         "stop_name",
-                    alt.Tooltip("event_avg:Q", format=".3f", title="Event avg"),
-                    alt.Tooltip("normal_avg:Q", format=".3f", title="Normal avg"),
-                    alt.Tooltip("event_share:Q", format=".2f", title="Event share"),
-                    alt.Tooltip("delta_event_minus_normal:Q", format=".3f", title="Delta"),
-                ],
+                        alt.Tooltip("event_avg:Q", format=".3f", title="Event avg"),
+                        alt.Tooltip("normal_avg:Q", format=".3f", title="Normal avg"),
+                        alt.Tooltip("event_share:Q", format=".2f", title="Event share"),
+                        alt.Tooltip("delta_event_minus_normal:Q", format=".3f", title="Delta"),
+                    ],
+                )
+                .properties(height=400)
             )
-            .properties(height=400)
-        )
             st.altair_chart(delta_chart, use_container_width=True)
 
         st.download_button(
