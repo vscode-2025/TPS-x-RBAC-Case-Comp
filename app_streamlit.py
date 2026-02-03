@@ -517,7 +517,8 @@ def main():
         stops_path = default_stops if use_defaults else None
         crime_path = default_crime if use_defaults else None
         stop_times_path = default_stop_times if use_defaults else None
-        events_path = default_events if use_defaults and Path(default_events).exists() else None
+        # Disable events file loading to prevent JSON errors
+        events_path = None
 
         # If using defaults, ensure files exist (e.g. on Streamlit Cloud repo may not include data files)
         if use_defaults:
@@ -566,24 +567,8 @@ def main():
                             "Add it to the repo or upload below (uncheck Use repo defaults)."
                         )
             
-            # Check events file - try multiple locations, but validate JSON before using
-            # Events file is optional - if it doesn't exist or is invalid, app continues without it
-            if events_path is None or not Path(events_path).exists():
-                alt_events_paths = [
-                    "Festivals and events json feed.json",
-                    "data/Festivals and events json feed.json",
-                ]
-                for alt_events in alt_events_paths:
-                    if Path(alt_events).exists():
-                        events_path = alt_events
-                        break
-                # Silently skip if events file not found - it's optional
-                if events_path is None or not Path(events_path).exists():
-                    events_path = None
-            
-            # Validate JSON before setting events_path - if invalid, set to None
-            if events_path and not _is_valid_json_file(events_path):
-                events_path = None
+            # Events file loading disabled to prevent JSON errors
+            events_path = None
             
             if stops_path is None or crime_path is None:
                 stop_times_path = None
@@ -593,7 +578,8 @@ def main():
             stops_file = st.file_uploader("stops.txt (CSV/TSV)", type=["csv", "txt", "tsv"])
             crime_file = st.file_uploader("Crime CSV/TSV", type=["csv", "txt", "tsv"])
             stop_times_file = st.file_uploader("stop_times (optional)", type=["csv", "txt", "tsv"])
-            events_file = st.file_uploader("Events JSON", type=["json"])
+            # Events file uploader disabled to prevent JSON errors
+            # events_file = st.file_uploader("Events JSON", type=["json"])
 
             # Save uploaded files to temp buffers for loader compatibility
             if stops_file:
@@ -611,10 +597,11 @@ def main():
                 tmp = Path(stop_times_file.name)
                 df.to_csv(tmp, index=False)
                 stop_times_path = str(tmp)
-            if events_file:
-                tmp = Path(events_file.name)
-                tmp.write_bytes(events_file.getvalue())
-                events_path = str(tmp)
+            # Events file upload disabled to prevent JSON errors
+            # if events_file:
+            #     tmp = Path(events_file.name)
+            #     tmp.write_bytes(events_file.getvalue())
+            #     events_path = str(tmp)
 
         st.header("Filters")
         radius_m = st.slider("Max distance to link crimes to a stop (m)", 50, 500, 250, step=25)
