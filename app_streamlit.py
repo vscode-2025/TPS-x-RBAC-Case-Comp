@@ -861,6 +861,83 @@ def main():
     if trend_df.empty:
         st.info("Not enough daily history to compute rolling trends with the current filters.")
     else:
+        # Filter options
+        trend_filter_col1, trend_filter_col2 = st.columns([3, 1])
+        with trend_filter_col1:
+            trend_risk_filter = st.multiselect(
+                "Filter by trend risk",
+                options=["HIGH", "STABLE", "DECREASING"],
+                default=["HIGH", "STABLE", "DECREASING"],
+                help="Show only stations with selected trend classifications",
+            )
+        with trend_filter_col2:
+            show_trend_charts = st.checkbox("Show charts", value=True)
+        
+        # Apply filter
+        if trend_risk_filter:
+            filtered_trend_df = trend_df[trend_df["expectedRisk"].isin(trend_risk_filter)].copy()
+        else:
+            filtered_trend_df = trend_df.copy()
+        
+        # KPIs
+        k1, k2, k3, k4 = st.columns(4)
+        high_count = int((trend_df["expectedRisk"] == "HIGH").sum())
+        stable_count = int((trend_df["expectedRisk"] == "STABLE").sum())
+        decreasing_count = int((trend_df["expectedRisk"] == "DECREASING").sum())
+        median_delta = trend_df["delta"].replace([float("inf")], np.nan).median()
+        k1.metric("HIGH trend stations", high_count)
+        k2.metric("Stable trend stations", stable_count)
+        k3.metric("Decreasing trend stations", decreasing_count)
+        k4.metric("Median delta", f"{median_delta:.2f}x" if pd.notna(median_delta) else "N/A")
+        st.caption("delta compares the 30-day rolling average to the 60-day baseline; >1 means short-term increase.")
+        
+        # Charts
+        if show_trend_charts and not filtered_trend_df.empty:
+            chart_col1, chart_col2 = st.columns(2)
+            
+            with chart_col1:
+                # Delta comparison chart
+                chart_df = filtered_trend_df.nlargest(20, "delta").copy()
+                chart_df["delta_clean"] = chart_df["delta"].replace([float("inf")], np.nan)
+                chart_df = chart_df[chart_df["delta_clean"].notna()]
+                if not chart_df.empty:
+                    delta_chart = (
+                        alt.Chart(chart_df)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X("delta_clean:Q", title="Delta (30-day / 60-day)"),
+                            y=alt.Y("station_id:N", sort="-x", title="Station ID"),
+                            color=alt.Color("expectedRisk:N", title="Risk Level"),
+                            tooltip=["station_id", "rolling30", "rolling60", "delta", "expectedRisk"],
+                        )
+                        .properties(height=400, title="Top 20 Stations by Delta")
+                    )
+                    st.altair_chart(delta_chart, use_container_width=True)
+            
+            with chart_col2:
+                # 30-day vs 60-day comparison
+                comparison_df = filtered_trend_df.head(20).copy()
+                comparison_df = comparison_df.melt(
+                    id_vars=["station_id", "expectedRisk"],
+                    value_vars=["rolling30", "rolling60"],
+                    var_name="window",
+                    value_name="avg_crimes_per_day"
+                )
+                comparison_chart = (
+                    alt.Chart(comparison_df)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("window:N", title="Rolling Window"),
+                        y=alt.Y("avg_crimes_per_day:Q", title="Avg Crimes per Day"),
+                        color=alt.Color("expectedRisk:N", title="Risk Level"),
+                        column=alt.Column("station_id:N", title="Station", header=alt.Header(labelAngle=-45)),
+                        tooltip=["station_id", "window", "avg_crimes_per_day", "expectedRisk"],
+                    )
+                    .properties(width=50, height=150, title="30-day vs 60-day Comparison (Top 20)")
+                )
+                st.altair_chart(comparison_chart, use_container_width=True)
+        
+        # Data table
         display_cols = [
             "station_id",
             "rolling30",
@@ -871,16 +948,16 @@ def main():
             "recommendation",
             "map_flag",
         ]
-        st.dataframe(trend_df[display_cols], use_container_width=True, hide_index=True)
-
-        k1, k2, k3 = st.columns(3)
-        high_count = int((trend_df["expectedRisk"] == "HIGH").sum())
-        stable_count = int((trend_df["expectedRisk"] == "STABLE").sum())
-        median_delta = trend_df["delta"].replace([float("inf")], np.nan).median()
-        k1.metric("HIGH trend stations", high_count)
-        k2.metric("Stable trend stations", stable_count)
-        k3.metric("Median delta", f"{median_delta:.2f}x" if pd.notna(median_delta) else "N/A")
-        st.caption("delta compares the 30-day rolling average to the 60-day baseline; >1 means short-term increase.")
+        st.dataframe(filtered_trend_df[display_cols], use_container_width=True, hide_index=True)
+        
+        # Export button
+        csv_bytes = filtered_trend_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download rolling trend CSV",
+            data=csv_bytes,
+            file_name=f"rolling_trend_{trend_as_of.strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+        )
 
     with st.expander("Rolling trend example payloads"):
         st.json(build_trend_example_outputs())
@@ -889,13 +966,83 @@ def main():
     if spike_df.empty:
         st.info("No stations have crimes recorded inside the selected two-hour window.")
     else:
+        # Filter and display options
+        spike_filter_col1, spike_filter_col2 = st.columns([3, 1])
+        with spike_filter_col1:
+            show_only_spikes = st.checkbox("Show only stations with spikes", value=False)
+        with spike_filter_col2:
+            show_spike_charts = st.checkbox("Show charts", value=True)
+        
+        # Apply filter
+        display_spike_df = spike_df[spike_df["spike"]] if show_only_spikes else spike_df.copy()
+        
         # Human-readable UI state for the table.
-        spike_df["ui_state"] = spike_df["ui_flag"].apply(
+        display_spike_df["ui_state"] = display_spike_df["ui_flag"].apply(
             lambda f: f"{(f or {}).get('color', 'unknown')} / " + ("blink" if (f or {}).get("blink") else "steady")
             if isinstance(f, dict)
             else "unknown"
         )
 
+        # KPIs
+        triggered = spike_df[spike_df["spike"]]
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Stations over threshold", int(len(triggered)))
+        k2.metric("Additional patrol units", int(triggered["recommended_units"].sum()))
+        max_percentage = spike_df["percentageAbove"].max() if not spike_df.empty else 0
+        avg_baseline = spike_df["baseline_2hr"].mean() if not spike_df.empty else 0
+        k3.metric("Max percentage above baseline", f"{max_percentage:.1f}%")
+        k4.metric("Avg baseline (2hr)", f"{avg_baseline:.2f}")
+        st.caption("Rule: spike triggers when recent_2hr > baseline_2hr * 1.3 (strict).")
+        
+        # Charts
+        if show_spike_charts and not display_spike_df.empty:
+            chart_col1, chart_col2 = st.columns(2)
+            
+            with chart_col1:
+                # Percentage above baseline chart
+                chart_df = display_spike_df.nlargest(20, "percentageAbove").copy()
+                chart_df["percentageAbove"] = chart_df["percentageAbove"].astype(float)
+                spike_chart = (
+                    alt.Chart(chart_df)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("percentageAbove:Q", title="Percentage Above Baseline (%)"),
+                        y=alt.Y("station_id:N", sort="-x", title="Station ID"),
+                        color=alt.Color(
+                            "spike:O",
+                            scale=alt.Scale(domain=[True, False], range=["#d32f2f", "#90a4ae"]),
+                            title="Spike Triggered"
+                        ),
+                        tooltip=["station_id", "baseline_2hr", "recent_2hr", "percentageAbove", "spike", "recommended_units"],
+                    )
+                    .properties(height=400, title="Top 20 Stations by Percentage Above Baseline")
+                )
+                st.altair_chart(spike_chart, use_container_width=True)
+            
+            with chart_col2:
+                # Baseline vs Recent comparison
+                comparison_df = display_spike_df.head(20).copy()
+                comparison_df = comparison_df.melt(
+                    id_vars=["station_id", "spike"],
+                    value_vars=["baseline_2hr", "recent_2hr"],
+                    var_name="metric",
+                    value_name="crime_count"
+                )
+                comparison_chart = (
+                    alt.Chart(comparison_df)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("metric:N", title="Metric"),
+                        y=alt.Y("crime_count:Q", title="Crime Count (2-hour window)"),
+                        color=alt.Color("spike:O", title="Spike Triggered"),
+                        column=alt.Column("station_id:N", title="Station", header=alt.Header(labelAngle=-45)),
+                        tooltip=["station_id", "metric", "crime_count", "spike"],
+                    )
+                    .properties(width=50, height=150, title="Baseline vs Recent (Top 20)")
+                )
+                st.altair_chart(comparison_chart, use_container_width=True)
+        
+        # Data table
         display_cols = [
             "station_id",
             "baseline_2hr",
@@ -912,19 +1059,22 @@ def main():
                 return ["background-color: #FFEBEE"] * len(row)
             return [""] * len(row)
 
-        table = spike_df[display_cols].copy()
+        table = display_spike_df[display_cols].copy()
         table["percentageAbove"] = table["percentageAbove"].astype(float)
         st.dataframe(
             table.style.apply(_style_spike_rows, axis=1),
             use_container_width=True,
             hide_index=True,
         )
-
-        triggered = spike_df[spike_df["spike"]]
-        k1, k2 = st.columns(2)
-        k1.metric("Stations over threshold", int(len(triggered)))
-        k2.metric("Additional patrol units", int(triggered["recommended_units"].sum()))
-        st.caption("Rule: spike triggers when recent_2hr > baseline_2hr * 1.3 (strict).")
+        
+        # Export button
+        csv_bytes = display_spike_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download spike detection CSV",
+            data=csv_bytes,
+            file_name=f"spike_detection_{spike_reference_ts.strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv",
+        )
 
     with st.expander("Spike payload examples"):
         st.json(build_example_outputs())
