@@ -103,24 +103,30 @@ def _load_events_json(path: str | Path) -> tuple[set[pd.Timestamp], pd.DataFrame
     if not path or not Path(path).exists():
         return set(), pd.DataFrame()
 
-    # Check if file is a Git LFS pointer
+    # Try to load JSON with comprehensive error handling
     try:
+        # Check if file is empty
+        if Path(path).stat().st_size == 0:
+            return set(), pd.DataFrame()
+        
         with open(path, "r", encoding="utf-8") as f:
+            # Check first line for Git LFS pointer
             first_line = f.readline().strip()
             if first_line == "version https://git-lfs.github.com/spec/v1":
                 # Git LFS pointer - cannot read actual data
                 return set(), pd.DataFrame()
-    except Exception:
-        pass
-
-    # Try to load JSON with error handling
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except json.JSONDecodeError:
-        # Invalid JSON (could be empty, corrupted, or LFS pointer)
+            # Reset file pointer to beginning
+            f.seek(0)
+            # Try to parse JSON
+            try:
+                raw = json.load(f)
+            except json.JSONDecodeError as e:
+                # Invalid JSON (could be empty, corrupted, or LFS pointer)
+                return set(), pd.DataFrame()
+    except (json.JSONDecodeError, ValueError, IOError, OSError) as e:
+        # Invalid JSON or file read error
         return set(), pd.DataFrame()
-    except Exception:
+    except Exception as e:
         # Any other error reading the file
         return set(), pd.DataFrame()
     
