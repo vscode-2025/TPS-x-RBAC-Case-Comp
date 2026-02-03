@@ -1148,20 +1148,28 @@ def main():
                     ),
                     tooltip=[
                         "stop_name",
-                    alt.Tooltip("event_avg:Q", format=".3f", title="Event avg"),
-                    alt.Tooltip("normal_avg:Q", format=".3f", title="Normal avg"),
-                    alt.Tooltip("event_share:Q", format=".2f", title="Event share"),
-                    alt.Tooltip("delta_event_minus_normal:Q", format=".3f", title="Delta"),
-                ],
+                        alt.Tooltip("event_avg:Q", format=".3f", title="Event avg"),
+                        alt.Tooltip("normal_avg:Q", format=".3f", title="Normal avg"),
+                        alt.Tooltip("event_share:Q", format=".2f", title="Event share"),
+                        alt.Tooltip("delta_event_minus_normal:Q", format=".3f", title="Delta"),
+                    ],
+                )
+                .properties(height=400)
             )
-            .properties(height=400)
-        )
             st.altair_chart(delta_chart, use_container_width=True)
 
         st.download_button(
             "Download event vs normal table",
             data=avg_display.rename(columns={"nearest_stop_name": "stop_name"}).round(4).to_csv(index=False).encode("utf-8"),
             file_name="event_vs_normal.csv",
+        )
+    else:
+        # Show message when events data is not available
+        st.subheader("Event vs Normal Day Comparison")
+        st.info(
+            "Event vs Normal Day comparison is not available because no events data was loaded. "
+            "To enable this feature, ensure the events JSON file (`Festivals and events json feed.json`) "
+            "is available and contains valid event dates."
         )
 
 
