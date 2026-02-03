@@ -103,10 +103,19 @@ def _load_events_json(path: str | Path) -> tuple[set[pd.Timestamp], pd.DataFrame
     if not path or not Path(path).exists():
         return set(), pd.DataFrame()
 
-    with open(path, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-    records = raw["value"] if isinstance(raw, dict) and "value" in raw else raw
-    events = pd.DataFrame(records)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (json.JSONDecodeError, ValueError, Exception):
+        # If JSON is invalid, return empty data - app continues without events
+        return set(), pd.DataFrame()
+    
+    try:
+        records = raw["value"] if isinstance(raw, dict) and "value" in raw else raw
+        events = pd.DataFrame(records)
+    except Exception:
+        # If data structure is invalid, return empty data
+        return set(), pd.DataFrame()
 
     if "event_dates" in events.columns:
         date_series = pd.json_normalize(events["event_dates"].explode())["date"]
