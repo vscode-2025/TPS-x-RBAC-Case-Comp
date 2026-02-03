@@ -59,11 +59,15 @@ def _is_git_lfs_pointer(file_path: Path) -> bool:
     """Check if a file is a Git LFS pointer (not actual data)."""
     if not file_path.exists():
         return False
+    # Skip check for compressed files - they can't be LFS pointers
+    if str(file_path).endswith(('.gz', '.zip', '.bz2', '.xz')):
+        return False
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             first_line = f.readline().strip()
             return first_line == "version https://git-lfs.github.com/spec/v1"
-    except Exception:
+    except (UnicodeDecodeError, Exception):
+        # If we can't decode as UTF-8, it's not a text LFS pointer
         return False
 
 
