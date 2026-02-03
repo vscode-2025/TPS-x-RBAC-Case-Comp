@@ -1078,8 +1078,9 @@ def main():
         st.json(build_example_outputs())
 
     # ----------------------------
-    # Event vs Normal comparison
+    # Event vs Normal Day Comparison
     # ----------------------------
+    st.divider()
     if "label" in linked.columns:
         st.subheader("Event vs Normal Day Comparison")
         daily = linked.copy()
