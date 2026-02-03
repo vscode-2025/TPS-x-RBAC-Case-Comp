@@ -869,7 +869,7 @@ def main():
                 help="Show only stations with selected trend classifications",
             )
         with trend_filter_col2:
-            show_trend_charts = st.checkbox("Show charts", value=True)
+            show_trend_charts = st.checkbox("Show charts", value=True, key="trend_charts_checkbox")
         
         # Apply filter
         if trend_risk_filter:
@@ -969,7 +969,7 @@ def main():
         with spike_filter_col1:
             show_only_spikes = st.checkbox("Show only stations with spikes", value=False)
         with spike_filter_col2:
-            show_spike_charts = st.checkbox("Show charts", value=True)
+            show_spike_charts = st.checkbox("Show charts", value=True, key="spike_charts_checkbox")
         
         # Apply filter
         display_spike_df = spike_df[spike_df["spike"]] if show_only_spikes else spike_df.copy()
