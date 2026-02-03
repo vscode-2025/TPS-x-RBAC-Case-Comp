@@ -142,8 +142,15 @@ def load_data(
     if not Path(stops_path).exists() or not Path(crime_path).exists():
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), set(), pd.DataFrame()
 
-    stops = load_stops(stops_path)
-    crime = load_crime(crime_path)
+    try:
+        stops = load_stops(stops_path)
+        crime = load_crime(crime_path)
+    except FileNotFoundError as e:
+        # Re-raise with context for Streamlit UI
+        import streamlit as st
+        if "Git LFS" in str(e):
+            st.error(str(e))
+        raise
 
     # Date filtering: exact range if provided, otherwise years_back
     if start_date is not None or end_date is not None:
