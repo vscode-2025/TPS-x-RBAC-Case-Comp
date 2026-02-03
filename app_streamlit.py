@@ -102,10 +102,22 @@ def _load_events_json(path: str | Path) -> tuple[set[pd.Timestamp], pd.DataFrame
     """
     if not path or not Path(path).exists():
         return set(), pd.DataFrame()
+    
+    # Check if file is empty
+    try:
+        if Path(path).stat().st_size == 0:
+            return set(), pd.DataFrame()
+    except Exception:
+        pass
 
     try:
         with open(path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
+            content = f.read().strip()
+            # Check if content is empty after stripping
+            if not content:
+                return set(), pd.DataFrame()
+            # Try to parse JSON
+            raw = json.loads(content)
     except (json.JSONDecodeError, ValueError, Exception):
         # If JSON is invalid, return empty data - app continues without events
         return set(), pd.DataFrame()
