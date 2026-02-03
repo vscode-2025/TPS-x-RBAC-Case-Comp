@@ -94,30 +94,6 @@ def _load_csv_from_uploader(file) -> pd.DataFrame:
         return pd.read_csv(buffer, sep="\t")
 
 
-def _is_valid_json_file(path: str | Path) -> bool:
-    """Quick check if file exists and appears to be valid JSON (not LFS pointer, not empty)."""
-    if not path or not Path(path).exists():
-        return False
-    try:
-        if Path(path).stat().st_size == 0:
-            return False
-        with open(path, "r", encoding="utf-8") as f:
-            first_line = f.readline().strip()
-            if first_line == "version https://git-lfs.github.com/spec/v1":
-                return False
-            # Try to parse first few characters as JSON
-            f.seek(0)
-            content = f.read(100)
-            if not content.strip():
-                return False
-            # Quick JSON validation - check if it starts with { or [
-            if not (content.strip().startswith("{") or content.strip().startswith("[")):
-                return False
-    except Exception:
-        return False
-    return True
-
-
 def _load_events_json(path: str | Path) -> tuple[set[pd.Timestamp], pd.DataFrame]:
     """
     Flatten the City events feed into:
@@ -126,94 +102,47 @@ def _load_events_json(path: str | Path) -> tuple[set[pd.Timestamp], pd.DataFrame
     """
     if not path or not Path(path).exists():
         return set(), pd.DataFrame()
-    
-    # Pre-check: if file doesn't look like valid JSON, skip it
-    if not _is_valid_json_file(path):
-        return set(), pd.DataFrame()
 
-    # Try to load JSON with comprehensive error handling
-    try:
-        # Check if file is empty (with error handling)
-        try:
-            if Path(path).stat().st_size == 0:
-                return set(), pd.DataFrame()
-        except (OSError, IOError, Exception):
-            # If we can't check file size, continue anyway
-            pass
-        
-        with open(path, "r", encoding="utf-8") as f:
-            # Check first line for Git LFS pointer
-            first_line = f.readline().strip()
-            if first_line == "version https://git-lfs.github.com/spec/v1":
-                # Git LFS pointer - cannot read actual data
-                return set(), pd.DataFrame()
-            # Reset file pointer to beginning
-            f.seek(0)
-            # Try to parse JSON
-            try:
-                raw = json.load(f)
-            except json.JSONDecodeError as e:
-                # Invalid JSON (could be empty, corrupted, or LFS pointer)
-                return set(), pd.DataFrame()
-    except (json.JSONDecodeError, ValueError, IOError, OSError) as e:
-        # Invalid JSON or file read error
-        return set(), pd.DataFrame()
-    except Exception as e:
-        # Any other error reading the file
-        return set(), pd.DataFrame()
-    
-    # Check if JSON is empty or invalid structure
-    if not raw:
-        return set(), pd.DataFrame()
-    
-    try:
-        records = raw["value"] if isinstance(raw, dict) and "value" in raw else raw
-        if not records:
-            return set(), pd.DataFrame()
-        events = pd.DataFrame(records)
-    except Exception:
-        # Error creating DataFrame from records
-        return set(), pd.DataFrame()
+    with open(path, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    records = raw["value"] if isinstance(raw, dict) and "value" in raw else raw
+    events = pd.DataFrame(records)
 
-    try:
-        if "event_dates" in events.columns:
-            date_series = pd.json_normalize(events["event_dates"].explode())["date"]
-            event_days = set(pd.to_datetime(date_series, unit="ms", errors="coerce").dropna().dt.normalize().dt.date)
-        else:
-            event_days = set()
+    if "event_dates" in events.columns:
+        date_series = pd.json_normalize(events["event_dates"].explode())["date"]
+        event_days = set(pd.to_datetime(date_series, unit="ms", errors="coerce").dropna().dt.normalize().dt.date)
+    else:
+        event_days = set()
 
-        # Points: take first gps_lat/gps_lng per event when available
-        if "event_locations" in events.columns:
-            exploded = events["event_locations"].explode().reset_index().rename(columns={"index": "event_idx"})
-            locs = pd.json_normalize(exploded["event_locations"])
+    # Points: take first gps_lat/gps_lng per event when available
+    if "event_locations" in events.columns:
+        exploded = events["event_locations"].explode().reset_index().rename(columns={"index": "event_idx"})
+        locs = pd.json_normalize(exploded["event_locations"])
 
-            def _parse_gps(val):
-                if not isinstance(val, str) or not val.strip():
-                    return None
-                try:
-                    obj = json.loads(val)
-                    if isinstance(obj, list) and obj and isinstance(obj[0], dict):
-                        return obj
-                except Exception:
-                    return None
+        def _parse_gps(val):
+            if not isinstance(val, str) or not val.strip():
                 return None
+            try:
+                obj = json.loads(val)
+                if isinstance(obj, list) and obj and isinstance(obj[0], dict):
+                    return obj
+            except Exception:
+                return None
+            return None
 
-            locs["gps"] = locs["location_gps"].apply(_parse_gps)
-            locs["lat"] = locs["gps"].apply(lambda x: x[0].get("gps_lat") if isinstance(x, list) and x else None)
-            locs["lon"] = locs["gps"].apply(lambda x: x[0].get("gps_lng") if isinstance(x, list) and x else None)
-            locs["event_idx"] = exploded["event_idx"]
-            locs = locs.dropna(subset=["lat", "lon"])
-            if not locs.empty:
-                locs["event_name"] = locs["event_idx"].map(events["event_name"])
-                locs = locs[["event_name", "lat", "lon"]]
-            else:
-                locs = pd.DataFrame()
+        locs["gps"] = locs["location_gps"].apply(_parse_gps)
+        locs["lat"] = locs["gps"].apply(lambda x: x[0].get("gps_lat") if isinstance(x, list) and x else None)
+        locs["lon"] = locs["gps"].apply(lambda x: x[0].get("gps_lng") if isinstance(x, list) and x else None)
+        locs["event_idx"] = exploded["event_idx"]
+        locs = locs.dropna(subset=["lat", "lon"])
+        if not locs.empty:
+            locs["event_name"] = locs["event_idx"].map(events["event_name"])
+            locs = locs[["event_name", "lat", "lon"]]
         else:
             locs = pd.DataFrame()
-        return event_days, locs
-    except Exception:
-        # If any error occurs during processing, return empty data
-        return set(), pd.DataFrame()
+    else:
+        locs = pd.DataFrame()
+    return event_days, locs
 
 
 @st.cache_data(show_spinner=False)
@@ -289,14 +218,7 @@ def load_data(
         )
 
     agg = aggregate(linked, freq=freq)
-    # Load events data with extra safety - never crash if events file is invalid
-    event_days, event_points = set(), pd.DataFrame()
-    if events_path:
-        try:
-            event_days, event_points = _load_events_json(events_path)
-        except Exception:
-            # If anything goes wrong loading events, just skip it
-            event_days, event_points = set(), pd.DataFrame()
+    event_days, event_points = _load_events_json(events_path) if events_path else (set(), pd.DataFrame())
     if event_days:
         linked["date"] = linked["crime_dt"].dt.date
         linked["label"] = np.where(linked["date"].isin(event_days), "Event day", "Normal day")
@@ -517,8 +439,7 @@ def main():
         stops_path = default_stops if use_defaults else None
         crime_path = default_crime if use_defaults else None
         stop_times_path = default_stop_times if use_defaults else None
-        # Disable events file loading to prevent JSON errors
-        events_path = None
+        events_path = default_events if use_defaults and Path(default_events).exists() else None
 
         # If using defaults, ensure files exist (e.g. on Streamlit Cloud repo may not include data files)
         if use_defaults:
@@ -566,10 +487,6 @@ def main():
                             f"`Major_Crime_Indicators.csv.gz`, `data/Major_Crime_Indicators.csv`, or `Major_Crime_Indicators.csv`. "
                             "Add it to the repo or upload below (uncheck Use repo defaults)."
                         )
-            
-            # Events file loading disabled to prevent JSON errors
-            events_path = None
-            
             if stops_path is None or crime_path is None:
                 stop_times_path = None
                 events_path = None
@@ -578,8 +495,7 @@ def main():
             stops_file = st.file_uploader("stops.txt (CSV/TSV)", type=["csv", "txt", "tsv"])
             crime_file = st.file_uploader("Crime CSV/TSV", type=["csv", "txt", "tsv"])
             stop_times_file = st.file_uploader("stop_times (optional)", type=["csv", "txt", "tsv"])
-            # Events file uploader disabled to prevent JSON errors
-            # events_file = st.file_uploader("Events JSON", type=["json"])
+            events_file = st.file_uploader("Events JSON", type=["json"])
 
             # Save uploaded files to temp buffers for loader compatibility
             if stops_file:
@@ -597,11 +513,10 @@ def main():
                 tmp = Path(stop_times_file.name)
                 df.to_csv(tmp, index=False)
                 stop_times_path = str(tmp)
-            # Events file upload disabled to prevent JSON errors
-            # if events_file:
-            #     tmp = Path(events_file.name)
-            #     tmp.write_bytes(events_file.getvalue())
-            #     events_path = str(tmp)
+            if events_file:
+                tmp = Path(events_file.name)
+                tmp.write_bytes(events_file.getvalue())
+                events_path = str(tmp)
 
         st.header("Filters")
         radius_m = st.slider("Max distance to link crimes to a stop (m)", 50, 500, 250, step=25)
@@ -1174,9 +1089,6 @@ def main():
     # Event vs Normal comparison
     # ----------------------------
     if "label" in linked.columns:
-        # Debug: show event days count in sidebar
-        if event_days:
-            st.sidebar.caption(f"📅 Event vs Normal: {len(event_days)} event days loaded")
         st.subheader("Event vs Normal Day Comparison")
         daily = linked.copy()
         daily["date"] = daily["crime_dt"].dt.date
@@ -1259,21 +1171,6 @@ def main():
             data=avg_display.rename(columns={"nearest_stop_name": "stop_name"}).round(4).to_csv(index=False).encode("utf-8"),
             file_name="event_vs_normal.csv",
         )
-    else:
-        # Show helpful message when events data is not available
-        st.subheader("Event vs Normal Day Comparison")
-        if not event_days:
-            st.info(
-                "⚠️ Event vs Normal Day comparison is not available because no events data was loaded. "
-                "To enable this feature:\n"
-                "1. Ensure the events JSON file (`Festivals and events json feed.json`) is in the repository, or\n"
-                "2. Upload the events JSON file using the file uploader in the sidebar (uncheck 'Use repo defaults')."
-            )
-        else:
-            st.info(
-                "⚠️ Event vs Normal Day comparison is not available. "
-                "Events data was loaded but no matching crime dates were found in the selected date range."
-            )
 
 
 if __name__ == "__main__":
