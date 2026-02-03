@@ -227,7 +227,14 @@ def load_data(
         )
 
     agg = aggregate(linked, freq=freq)
-    event_days, event_points = _load_events_json(events_path) if events_path else (set(), pd.DataFrame())
+    # Load events with error handling - never crash if JSON is invalid
+    event_days, event_points = set(), pd.DataFrame()
+    if events_path:
+        try:
+            event_days, event_points = _load_events_json(events_path)
+        except Exception:
+            # If anything goes wrong, just skip events - app continues without Event vs Normal Day feature
+            event_days, event_points = set(), pd.DataFrame()
     if event_days:
         linked["date"] = linked["crime_dt"].dt.date
         linked["label"] = np.where(linked["date"].isin(event_days), "Event day", "Normal day")
