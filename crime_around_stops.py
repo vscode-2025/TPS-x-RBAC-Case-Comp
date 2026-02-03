@@ -405,30 +405,43 @@ def make_map(
                 ).add_to(layer)
 
             # Rolling trend overlay marker (color shows expectedRisk classification).
+            # Make it more visible: larger radius and thicker border
             if trend_color:
                 folium.CircleMarker(
                     location=[row.stop_lat, row.stop_lon],
-                    radius=4.5,
+                    radius=8,
                     color=trend_color,
                     fill=True,
                     fill_color=trend_color,
-                    fill_opacity=0.85,
-                    weight=2,
+                    fill_opacity=0.9,
+                    weight=3,
+                    popup=folium.Popup(
+                        html=f"<b>Rolling Trend</b><br>{trend_text or 'N/A'}",
+                        max_width=220,
+                    ),
                 ).add_to(layer)
 
             # Spike detection marker: dark gray = spike, light gray = no spike. Prominent ring + light fill.
+            # Make spike markers more visible - only show if spike is triggered, or show all with different styles
             if spike_color:
+                # For spike (dark gray), make it very prominent
+                # For no spike (light gray), make it smaller and less prominent
+                is_spike = spike_color == "#37474f"
+                marker_radius = 25 if is_spike else 15
+                marker_weight = 8 if is_spike else 4
+                marker_opacity = 0.3 if is_spike else 0.15
+                
                 folium.CircleMarker(
                     location=[row.stop_lat, row.stop_lon],
-                    radius=20,
+                    radius=marker_radius,
                     color=spike_color,
                     fill=True,
                     fill_color=spike_color,
-                    fill_opacity=0.25,
-                    weight=6,
+                    fill_opacity=marker_opacity,
+                    weight=marker_weight,
                     popup=folium.Popup(
                         html=f"<b>2hr TPS rule</b><br>{spike_text or 'N/A'}"
-                        + ("<br><i>Blink in live UI</i>" if spike_blink else ""),
+                        + ("<br><i>⚠️ SPIKE TRIGGERED - Blink in live UI</i>" if spike_blink else ""),
                         max_width=220,
                     ),
                 ).add_to(layer)
