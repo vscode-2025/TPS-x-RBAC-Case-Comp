@@ -10,7 +10,7 @@ venv/
 *.ipynb
 
 # Large local data artifacts in this folder layout
-Major_Crime_Indicators.csv
+# Major_Crime_Indicators.csv  # Now tracked for Streamlit Cloud
 Festivals and events json feed.json
-Complete GTFS/
+# Complete GTFS/  # Now tracked for Streamlit Cloud
 data/processed/
