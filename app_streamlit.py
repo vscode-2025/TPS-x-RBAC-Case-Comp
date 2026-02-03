@@ -523,8 +523,8 @@ def main():
             else:
                 start_date = end_date = None
         st.subheader("Risk weights")
-        intensity_w = st.slider("Intensity weight", 0.0, 1.0, 0.7, 0.05)
-        severity_w = st.slider("Severity weight", 0.0, 1.0, 0.3, 0.05)
+        intensity_w = st.slider("Intensity weight", 0.0, 1.0, 0.5, 0.05)
+        severity_w = st.slider("Severity weight", 0.0, 1.0, 0.5, 0.05)
         st.subheader("Division filter")
         division_select = st.multiselect("Divisions", options=["14", "51", "52"], default=["14", "51", "52"])
         # placeholder for crime type selector (filled after data load)
