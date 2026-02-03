@@ -378,15 +378,31 @@ def make_map(
                     + (" (blink)" if spike_blink else "")
                 )
 
-            folium.RegularPolygonMarker(
-                location=[row.stop_lat, row.stop_lon],
-                number_of_sides=4,
-                radius=min(8, 2 + (total ** 0.5) / 2),
-                color=stop_color(level),
-                fill=True,
-                fill_opacity=0.9,
-                popup=folium.Popup(html="".join(popup_html_parts), max_width=260),
-            ).add_to(layer)
+            # Draw stop marker: square for normal, diamond (rotated square) for Moderate/High risk
+            # Use diamond shape for Moderate and High risk stops
+            if level in ["Moderate", "High"]:
+                # Diamond marker (rotated 45 degrees)
+                folium.RegularPolygonMarker(
+                    location=[row.stop_lat, row.stop_lon],
+                    number_of_sides=4,
+                    radius=min(8, 2 + (total ** 0.5) / 2),
+                    rotation=45,
+                    color=stop_color(level),
+                    fill=True,
+                    fill_opacity=0.9,
+                    popup=folium.Popup(html="".join(popup_html_parts), max_width=260),
+                ).add_to(layer)
+            else:
+                # Square marker for Low/Elevated/None
+                folium.RegularPolygonMarker(
+                    location=[row.stop_lat, row.stop_lon],
+                    number_of_sides=4,
+                    radius=min(8, 2 + (total ** 0.5) / 2),
+                    color=stop_color(level),
+                    fill=True,
+                    fill_opacity=0.9,
+                    popup=folium.Popup(html="".join(popup_html_parts), max_width=260),
+                ).add_to(layer)
 
             # Rolling trend overlay marker (color shows expectedRisk classification).
             if trend_color:
