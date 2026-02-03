@@ -55,26 +55,7 @@ from rolling_trend import build_trend_example_outputs, build_trend_snapshot
 from spike_detection import build_example_outputs, build_station_snapshot
 
 
-def _is_git_lfs_pointer(file_path: Path) -> bool:
-    """Check if a file is a Git LFS pointer (not actual data)."""
-    if not file_path.exists():
-        return False
-    # Skip check for compressed files - they can't be LFS pointers
-    if str(file_path).endswith(('.gz', '.zip', '.bz2', '.xz')):
-        return False
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            first_line = f.readline().strip()
-            return first_line == "version https://git-lfs.github.com/spec/v1"
-    except (UnicodeDecodeError, Exception):
-        # If we can't decode as UTF-8, it's not a text LFS pointer
-        return False
-
-
-def _file_exists_and_not_lfs(file_path: str | Path) -> bool:
-    """Check if file exists and is not a Git LFS pointer."""
-    path = Path(file_path)
-    return path.exists() and not _is_git_lfs_pointer(path)
+# Git LFS checks removed - directly use files
 
 
 # ----------------------------
@@ -202,19 +183,8 @@ def load_data(
         stops = load_stops(stops_path)
         crime = load_crime(crime_path)
         
-        # Check if crime data is empty (could be due to LFS pointer or other issues)
+        # Check if crime data is empty
         if crime.empty:
-            # Check if the file exists and is an LFS pointer
-            crime_path_obj = Path(crime_path)
-            if crime_path_obj.exists() and not str(crime_path_obj).endswith(('.gz', '.zip', '.bz2', '.xz')):
-                try:
-                    with open(crime_path_obj, "r", encoding="utf-8") as f:
-                        first_line = f.readline().strip()
-                        if first_line == "version https://git-lfs.github.com/spec/v1":
-                            # Return empty data - UI will show warning message
-                            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), set(), pd.DataFrame()
-                except (UnicodeDecodeError, Exception):
-                    pass
             # If file doesn't exist or other issue, return empty
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), set(), pd.DataFrame()
     except Exception as e:
@@ -454,14 +424,14 @@ def main():
     default_stops = "Complete GTFS/stops.txt"
     default_stop_times = "data/processed/stop_times_with_stops.csv.gz"
     # Prefer compressed file (smaller, can be committed to git)
-    # Check compressed version first, then uncompressed, skip Git LFS pointers
-    if _file_exists_and_not_lfs("data/Major_Crime_Indicators.csv.gz"):
+    # Check compressed version first, then uncompressed
+    if Path("data/Major_Crime_Indicators.csv.gz").exists():
         default_crime = "data/Major_Crime_Indicators.csv.gz"
-    elif _file_exists_and_not_lfs("Major_Crime_Indicators.csv.gz"):
+    elif Path("Major_Crime_Indicators.csv.gz").exists():
         default_crime = "Major_Crime_Indicators.csv.gz"
-    elif _file_exists_and_not_lfs("Major_Crime_Indicators.csv"):
+    elif Path("Major_Crime_Indicators.csv").exists():
         default_crime = "Major_Crime_Indicators.csv"
-    elif _file_exists_and_not_lfs("data/Major_Crime_Indicators.csv"):
+    elif Path("data/Major_Crime_Indicators.csv").exists():
         default_crime = "data/Major_Crime_Indicators.csv"
     else:
         default_crime = "data/Major_Crime_Indicators.csv.gz"  # Will show warning if missing
@@ -492,8 +462,8 @@ def main():
                     f"Default stops file not found: `{default_stops}`. Add it to the repo or upload below (uncheck Use repo defaults)."
                 )
             
-            # Check crime file - try multiple locations (compressed and uncompressed), skip Git LFS pointers
-            crime_exists = _file_exists_and_not_lfs(default_crime)
+            # Check crime file - try multiple locations (compressed and uncompressed)
+            crime_exists = Path(default_crime).exists()
             if not crime_exists:
                 # Try alternative locations in order of preference
                 alt_paths = [
@@ -503,31 +473,18 @@ def main():
                     "Major_Crime_Indicators.csv",
                 ]
                 for alt_crime in alt_paths:
-                    if alt_crime != default_crime and _file_exists_and_not_lfs(alt_crime):
+                    if alt_crime != default_crime and Path(alt_crime).exists():
                         crime_path = alt_crime
                         crime_exists = True
                         break
                 
                 if not crime_exists:
                     crime_path = None
-                    # Check if any path exists but is an LFS pointer
-                    checked_paths = [default_crime] + alt_paths
-                    lfs_found = False
-                    for check_path in checked_paths:
-                        if Path(check_path).exists() and _is_git_lfs_pointer(Path(check_path)):
-                            st.warning(
-                                f"Default crime file `{check_path}` is stored in Git LFS and cannot be read on Streamlit Cloud. "
-                                "Please upload the CSV file directly using the file uploader below (uncheck Use repo defaults)."
-                            )
-                            lfs_found = True
-                            break
-                    
-                    if not lfs_found:
-                        st.warning(
-                            f"Default crime file not found. Expected one of: `data/Major_Crime_Indicators.csv.gz`, "
-                            f"`Major_Crime_Indicators.csv.gz`, `data/Major_Crime_Indicators.csv`, or `Major_Crime_Indicators.csv`. "
-                            "Add it to the repo or upload below (uncheck Use repo defaults)."
-                        )
+                    st.warning(
+                        f"Default crime file not found. Expected one of: `data/Major_Crime_Indicators.csv.gz`, "
+                        f"`Major_Crime_Indicators.csv.gz`, `data/Major_Crime_Indicators.csv`, or `Major_Crime_Indicators.csv`. "
+                        "Add it to the repo or upload below (uncheck Use repo defaults)."
+                    )
             if stops_path is None or crime_path is None:
                 stop_times_path = None
                 events_path = None
