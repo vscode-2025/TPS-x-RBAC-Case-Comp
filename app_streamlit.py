@@ -713,8 +713,6 @@ def main():
             )
         )
         trend_text_lookup = dict(zip(trend_df["station_id"].astype(str), trend_df["trendText"]))
-        # Debug: show how many stations have trend data
-        st.sidebar.caption(f"📊 Rolling trend: {len(trend_color_lookup)} stations")
 
     # Spike detection map lookups: gray shades (dark = spike, light = no spike), blink, and short text for popup
     spike_color_lookup = None
@@ -748,10 +746,6 @@ def main():
                 ),
             )
         )
-        # Debug: show how many stations have spike data
-        spike_count = len(spike_color_lookup)
-        triggered_count = int(spike_df["spike"].sum())
-        st.sidebar.caption(f"⚡ Spike detection: {spike_count} stations ({triggered_count} triggered)")
 
     cols = st.columns([2, 1])
     with cols[0]:
