@@ -55,6 +55,24 @@ from rolling_trend import build_trend_example_outputs, build_trend_snapshot
 from spike_detection import build_example_outputs, build_station_snapshot
 
 
+def _is_git_lfs_pointer(file_path: Path) -> bool:
+    """Check if a file is a Git LFS pointer (not actual data)."""
+    if not file_path.exists():
+        return False
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            first_line = f.readline().strip()
+            return first_line == "version https://git-lfs.github.com/spec/v1"
+    except Exception:
+        return False
+
+
+def _file_exists_and_not_lfs(file_path: str | Path) -> bool:
+    """Check if file exists and is not a Git LFS pointer."""
+    path = Path(file_path)
+    return path.exists() and not _is_git_lfs_pointer(path)
+
+
 # ----------------------------
 # Helpers
 # ----------------------------
@@ -376,7 +394,13 @@ def main():
     default_stops = "Complete GTFS/stops.txt"
     default_stop_times = "data/processed/stop_times_with_stops.csv.gz"
     # Check root first, then data/ folder (for Streamlit Cloud compatibility)
-    default_crime = "Major_Crime_Indicators.csv" if Path("Major_Crime_Indicators.csv").exists() else "data/Major_Crime_Indicators.csv"
+    # Skip Git LFS pointer files - they can't be read on Streamlit Cloud
+    if _file_exists_and_not_lfs("Major_Crime_Indicators.csv"):
+        default_crime = "Major_Crime_Indicators.csv"
+    elif _file_exists_and_not_lfs("data/Major_Crime_Indicators.csv"):
+        default_crime = "data/Major_Crime_Indicators.csv"
+    else:
+        default_crime = "data/Major_Crime_Indicators.csv"  # Will show warning if LFS or missing
     default_events = "Festivals and events json feed.json"
 
     sidebar = st.sidebar
@@ -404,19 +428,31 @@ def main():
                     f"Default stops file not found: `{default_stops}`. Add it to the repo or upload below (uncheck Use repo defaults)."
                 )
             
-            # Check crime file - try both locations
-            crime_exists = Path(default_crime).exists()
+            # Check crime file - try both locations, but skip Git LFS pointers
+            crime_exists = _file_exists_and_not_lfs(default_crime)
             if not crime_exists:
                 # Try the alternative location
                 alt_crime = "data/Major_Crime_Indicators.csv" if default_crime == "Major_Crime_Indicators.csv" else "Major_Crime_Indicators.csv"
-                if Path(alt_crime).exists():
+                if _file_exists_and_not_lfs(alt_crime):
                     crime_path = alt_crime
                     crime_exists = True
                 else:
                     crime_path = None
-                    st.warning(
-                        f"Default crime file not found: `{default_crime}`. Add it to the repo or upload below (uncheck Use repo defaults)."
-                    )
+                    # Check if it's an LFS pointer to give a more helpful message
+                    if Path(default_crime).exists() and _is_git_lfs_pointer(Path(default_crime)):
+                        st.warning(
+                            f"Default crime file `{default_crime}` is stored in Git LFS and cannot be read on Streamlit Cloud. "
+                            "Please upload the CSV file directly using the file uploader below (uncheck Use repo defaults)."
+                        )
+                    elif Path(alt_crime).exists() and _is_git_lfs_pointer(Path(alt_crime)):
+                        st.warning(
+                            f"Default crime file `{alt_crime}` is stored in Git LFS and cannot be read on Streamlit Cloud. "
+                            "Please upload the CSV file directly using the file uploader below (uncheck Use repo defaults)."
+                        )
+                    else:
+                        st.warning(
+                            f"Default crime file not found: `{default_crime}`. Add it to the repo or upload below (uncheck Use repo defaults)."
+                        )
             if stops_path is None or crime_path is None:
                 stop_times_path = None
                 events_path = None
