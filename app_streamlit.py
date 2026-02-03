@@ -538,7 +538,8 @@ def main():
                             "Add it to the repo or upload below (uncheck Use repo defaults)."
                         )
             
-            # Check events file - try multiple locations
+            # Check events file - try multiple locations, but don't show warnings if missing
+            # Events file is optional - if it doesn't exist or is invalid, app continues without it
             if events_path is None or not Path(events_path).exists():
                 alt_events_paths = [
                     "Festivals and events json feed.json",
@@ -548,11 +549,9 @@ def main():
                     if Path(alt_events).exists():
                         events_path = alt_events
                         break
+                # Silently skip if events file not found - it's optional
                 if events_path is None or not Path(events_path).exists():
-                    st.info(
-                        f"Events file not found at `{default_events}`. Event vs Normal Day comparison will not be available. "
-                        "Upload the events JSON file below (uncheck Use repo defaults) to enable this feature."
-                    )
+                    events_path = None
             
             if stops_path is None or crime_path is None:
                 stop_times_path = None
