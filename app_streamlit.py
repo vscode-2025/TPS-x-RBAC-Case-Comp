@@ -167,12 +167,27 @@ def load_data(
     try:
         stops = load_stops(stops_path)
         crime = load_crime(crime_path)
-    except FileNotFoundError as e:
-        # Re-raise with context for Streamlit UI
+        
+        # Check if crime data is empty (could be due to LFS pointer or other issues)
+        if crime.empty:
+            # Check if the file exists and is an LFS pointer
+            crime_path_obj = Path(crime_path)
+            if crime_path_obj.exists() and not str(crime_path_obj).endswith(('.gz', '.zip', '.bz2', '.xz')):
+                try:
+                    with open(crime_path_obj, "r", encoding="utf-8") as f:
+                        first_line = f.readline().strip()
+                        if first_line == "version https://git-lfs.github.com/spec/v1":
+                            # Return empty data - UI will show warning message
+                            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), set(), pd.DataFrame()
+                except (UnicodeDecodeError, Exception):
+                    pass
+            # If file doesn't exist or other issue, return empty
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), set(), pd.DataFrame()
+    except Exception as e:
+        # Log error but don't crash - return empty data
         import streamlit as st
-        if "Git LFS" in str(e):
-            st.error(str(e))
-        raise
+        st.error(f"Error loading data: {str(e)}")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), set(), pd.DataFrame()
 
     # Date filtering: exact range if provided, otherwise years_back
     if start_date is not None or end_date is not None:

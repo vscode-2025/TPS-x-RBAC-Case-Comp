@@ -132,17 +132,20 @@ def load_crime(crime_path: str | pathlib.Path) -> pd.DataFrame:
             with open(crime_path, "r", encoding="utf-8") as f:
                 first_line = f.readline().strip()
                 if first_line == "version https://git-lfs.github.com/spec/v1":
-                    raise FileNotFoundError(
-                        f"File {crime_path} is stored in Git LFS and cannot be read on Streamlit Cloud. "
-                        "Please upload the CSV file directly using the file uploader in the app sidebar."
-                    )
+                    # Return empty DataFrame instead of raising error - let UI handle the message
+                    return pd.DataFrame()
         except UnicodeDecodeError:
             # If we can't decode as UTF-8, it's not a text LFS pointer, continue normally
             pass
     
     # pandas automatically handles .gz files
-    crime = pd.read_csv(crime_path)
-
+    try:
+        crime = pd.read_csv(crime_path)
+    except Exception as e:
+        # If reading fails (e.g., corrupted file, wrong format), return empty DataFrame
+        return pd.DataFrame()
+    
+    # Process the loaded data
     lat_col = _resolve_col(crime, ["lat_wgs84", "latitude", "lat"])
     lon_col = _resolve_col(crime, ["long_wgs84", "longitude", "lon", "lng"])
     div_col = _resolve_col(crime, ["division"])
