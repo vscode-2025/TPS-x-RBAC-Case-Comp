@@ -124,6 +124,17 @@ def load_crime(crime_path: str | pathlib.Path) -> pd.DataFrame:
     - MCI or a general crime type column (kept if present)
     """
     crime_path = pathlib.Path(crime_path)
+    
+    # Check if file is a Git LFS pointer (Streamlit Cloud doesn't support LFS)
+    if crime_path.exists():
+        with open(crime_path, "r", encoding="utf-8") as f:
+            first_line = f.readline().strip()
+            if first_line == "version https://git-lfs.github.com/spec/v1":
+                raise FileNotFoundError(
+                    f"File {crime_path} is stored in Git LFS and cannot be read on Streamlit Cloud. "
+                    "Please upload the CSV file directly using the file uploader in the app sidebar."
+                )
+    
     crime = pd.read_csv(crime_path)
 
     lat_col = _resolve_col(crime, ["lat_wgs84", "latitude", "lat"])
