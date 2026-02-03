@@ -404,47 +404,8 @@ def make_map(
                     popup=folium.Popup(html="".join(popup_html_parts), max_width=260),
                 ).add_to(layer)
 
-            # Rolling trend overlay marker (color shows expectedRisk classification).
-            # Make it more visible: larger radius and thicker border
-            if trend_color:
-                folium.CircleMarker(
-                    location=[row.stop_lat, row.stop_lon],
-                    radius=8,
-                    color=trend_color,
-                    fill=True,
-                    fill_color=trend_color,
-                    fill_opacity=0.9,
-                    weight=3,
-                    popup=folium.Popup(
-                        html=f"<b>Rolling Trend</b><br>{trend_text or 'N/A'}",
-                        max_width=220,
-                    ),
-                ).add_to(layer)
-
-            # Spike detection marker: dark gray = spike, light gray = no spike. Prominent ring + light fill.
-            # Make spike markers more visible - only show if spike is triggered, or show all with different styles
-            if spike_color:
-                # For spike (dark gray), make it very prominent
-                # For no spike (light gray), make it smaller and less prominent
-                is_spike = spike_color == "#37474f"
-                marker_radius = 25 if is_spike else 15
-                marker_weight = 8 if is_spike else 4
-                marker_opacity = 0.3 if is_spike else 0.15
-                
-                folium.CircleMarker(
-                    location=[row.stop_lat, row.stop_lon],
-                    radius=marker_radius,
-                    color=spike_color,
-                    fill=True,
-                    fill_color=spike_color,
-                    fill_opacity=marker_opacity,
-                    weight=marker_weight,
-                    popup=folium.Popup(
-                        html=f"<b>2hr TPS rule</b><br>{spike_text or 'N/A'}"
-                        + ("<br><i>⚠️ SPIKE TRIGGERED - Blink in live UI</i>" if spike_blink else ""),
-                        max_width=220,
-                    ),
-                ).add_to(layer)
+            # Note: Trend and spike markers are now added to separate layers after all period layers
+            # This ensures they're always visible and not hidden by period layer controls
 
         # Individual crimes for this period
         for _, row in grp.iterrows():
@@ -469,6 +430,68 @@ def make_map(
             ).add_to(layer)
 
         layer.add_to(m)
+
+    # Add trend and spike markers to separate layers so they're always visible
+    # Rolling trend markers layer
+    if trend_color_lookup:
+        trend_layer = folium.FeatureGroup(name="Rolling Trend Indicators", show=True)
+        for stop_id in stop_lookup.index:
+            if stop_id not in stop_lookup.index:
+                continue
+            row = stop_lookup.loc[stop_id]
+            trend_color = trend_color_lookup.get(str(stop_id)) or trend_color_lookup.get(stop_id)
+            trend_text = trend_text_lookup.get(str(stop_id)) if trend_text_lookup else None
+            
+            if trend_color:
+                folium.CircleMarker(
+                    location=[row.stop_lat, row.stop_lon],
+                    radius=8,
+                    color=trend_color,
+                    fill=True,
+                    fill_color=trend_color,
+                    fill_opacity=0.9,
+                    weight=3,
+                    popup=folium.Popup(
+                        html=f"<b>Rolling Trend</b><br>{trend_text or 'N/A'}",
+                        max_width=220,
+                    ),
+                ).add_to(trend_layer)
+        trend_layer.add_to(m)
+    
+    # Spike detection markers layer
+    if spike_color_lookup:
+        spike_layer = folium.FeatureGroup(name="2hr Spike Detection", show=True)
+        for stop_id in stop_lookup.index:
+            if stop_id not in stop_lookup.index:
+                continue
+            row = stop_lookup.loc[stop_id]
+            spike_color = spike_color_lookup.get(str(stop_id)) or spike_color_lookup.get(stop_id)
+            spike_blink = spike_blink_lookup.get(str(stop_id)) if spike_blink_lookup else False
+            spike_text = spike_text_lookup.get(str(stop_id)) if spike_text_lookup else None
+            
+            if spike_color:
+                # For spike (dark gray), make it very prominent
+                # For no spike (light gray), make it smaller and less prominent
+                is_spike = spike_color == "#37474f"
+                marker_radius = 25 if is_spike else 15
+                marker_weight = 8 if is_spike else 4
+                marker_opacity = 0.3 if is_spike else 0.15
+                
+                folium.CircleMarker(
+                    location=[row.stop_lat, row.stop_lon],
+                    radius=marker_radius,
+                    color=spike_color,
+                    fill=True,
+                    fill_color=spike_color,
+                    fill_opacity=marker_opacity,
+                    weight=marker_weight,
+                    popup=folium.Popup(
+                        html=f"<b>2hr TPS rule</b><br>{spike_text or 'N/A'}"
+                        + ("<br><i>⚠️ SPIKE TRIGGERED - Blink in live UI</i>" if spike_blink else ""),
+                        max_width=220,
+                    ),
+                ).add_to(spike_layer)
+        spike_layer.add_to(m)
 
     folium.LayerControl(collapsed=False).add_to(m)
 
