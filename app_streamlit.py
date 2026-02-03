@@ -103,46 +103,79 @@ def _load_events_json(path: str | Path) -> tuple[set[pd.Timestamp], pd.DataFrame
     if not path or not Path(path).exists():
         return set(), pd.DataFrame()
 
-    with open(path, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-    records = raw["value"] if isinstance(raw, dict) and "value" in raw else raw
-    events = pd.DataFrame(records)
+    # Check if file is a Git LFS pointer
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            first_line = f.readline().strip()
+            if first_line == "version https://git-lfs.github.com/spec/v1":
+                # Git LFS pointer - cannot read actual data
+                return set(), pd.DataFrame()
+    except Exception:
+        pass
 
-    if "event_dates" in events.columns:
-        date_series = pd.json_normalize(events["event_dates"].explode())["date"]
-        event_days = set(pd.to_datetime(date_series, unit="ms", errors="coerce").dropna().dt.normalize().dt.date)
-    else:
-        event_days = set()
+    # Try to load JSON with error handling
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except json.JSONDecodeError:
+        # Invalid JSON (could be empty, corrupted, or LFS pointer)
+        return set(), pd.DataFrame()
+    except Exception:
+        # Any other error reading the file
+        return set(), pd.DataFrame()
+    
+    # Check if JSON is empty or invalid structure
+    if not raw:
+        return set(), pd.DataFrame()
+    
+    try:
+        records = raw["value"] if isinstance(raw, dict) and "value" in raw else raw
+        if not records:
+            return set(), pd.DataFrame()
+        events = pd.DataFrame(records)
+    except Exception:
+        # Error creating DataFrame from records
+        return set(), pd.DataFrame()
 
-    # Points: take first gps_lat/gps_lng per event when available
-    if "event_locations" in events.columns:
-        exploded = events["event_locations"].explode().reset_index().rename(columns={"index": "event_idx"})
-        locs = pd.json_normalize(exploded["event_locations"])
+    try:
+        if "event_dates" in events.columns:
+            date_series = pd.json_normalize(events["event_dates"].explode())["date"]
+            event_days = set(pd.to_datetime(date_series, unit="ms", errors="coerce").dropna().dt.normalize().dt.date)
+        else:
+            event_days = set()
 
-        def _parse_gps(val):
-            if not isinstance(val, str) or not val.strip():
+        # Points: take first gps_lat/gps_lng per event when available
+        if "event_locations" in events.columns:
+            exploded = events["event_locations"].explode().reset_index().rename(columns={"index": "event_idx"})
+            locs = pd.json_normalize(exploded["event_locations"])
+
+            def _parse_gps(val):
+                if not isinstance(val, str) or not val.strip():
+                    return None
+                try:
+                    obj = json.loads(val)
+                    if isinstance(obj, list) and obj and isinstance(obj[0], dict):
+                        return obj
+                except Exception:
+                    return None
                 return None
-            try:
-                obj = json.loads(val)
-                if isinstance(obj, list) and obj and isinstance(obj[0], dict):
-                    return obj
-            except Exception:
-                return None
-            return None
 
-        locs["gps"] = locs["location_gps"].apply(_parse_gps)
-        locs["lat"] = locs["gps"].apply(lambda x: x[0].get("gps_lat") if isinstance(x, list) and x else None)
-        locs["lon"] = locs["gps"].apply(lambda x: x[0].get("gps_lng") if isinstance(x, list) and x else None)
-        locs["event_idx"] = exploded["event_idx"]
-        locs = locs.dropna(subset=["lat", "lon"])
-        if not locs.empty:
-            locs["event_name"] = locs["event_idx"].map(events["event_name"])
-            locs = locs[["event_name", "lat", "lon"]]
+            locs["gps"] = locs["location_gps"].apply(_parse_gps)
+            locs["lat"] = locs["gps"].apply(lambda x: x[0].get("gps_lat") if isinstance(x, list) and x else None)
+            locs["lon"] = locs["gps"].apply(lambda x: x[0].get("gps_lng") if isinstance(x, list) and x else None)
+            locs["event_idx"] = exploded["event_idx"]
+            locs = locs.dropna(subset=["lat", "lon"])
+            if not locs.empty:
+                locs["event_name"] = locs["event_idx"].map(events["event_name"])
+                locs = locs[["event_name", "lat", "lon"]]
+            else:
+                locs = pd.DataFrame()
         else:
             locs = pd.DataFrame()
-    else:
-        locs = pd.DataFrame()
-    return event_days, locs
+        return event_days, locs
+    except Exception:
+        # If any error occurs during processing, return empty data
+        return set(), pd.DataFrame()
 
 
 @st.cache_data(show_spinner=False)
