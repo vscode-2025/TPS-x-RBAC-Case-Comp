@@ -382,9 +382,10 @@ def main():
     sidebar = st.sidebar
     with sidebar:
         st.header("Data sources")
+        # Always default to checked - user can uncheck if they want to upload files
         use_defaults = st.checkbox(
             "Use repo defaults",
-            value=Path(default_stops).exists() and Path(default_crime).exists(),
+            value=True,
             help="Use the included GTFS stops and TPS crime export.",
         )
 
@@ -395,16 +396,27 @@ def main():
 
         # If using defaults, ensure files exist (e.g. on Streamlit Cloud repo may not include data files)
         if use_defaults:
-            if not Path(default_stops).exists():
+            # Check stops file
+            stops_exists = Path(default_stops).exists()
+            if not stops_exists:
                 stops_path = None
                 st.warning(
                     f"Default stops file not found: `{default_stops}`. Add it to the repo or upload below (uncheck Use repo defaults)."
                 )
-            if not Path(default_crime).exists():
-                crime_path = None
-                st.warning(
-                    f"Default crime file not found: `{default_crime}`. Add it to the repo or upload below (uncheck Use repo defaults)."
-                )
+            
+            # Check crime file - try both locations
+            crime_exists = Path(default_crime).exists()
+            if not crime_exists:
+                # Try the alternative location
+                alt_crime = "data/Major_Crime_Indicators.csv" if default_crime == "Major_Crime_Indicators.csv" else "Major_Crime_Indicators.csv"
+                if Path(alt_crime).exists():
+                    crime_path = alt_crime
+                    crime_exists = True
+                else:
+                    crime_path = None
+                    st.warning(
+                        f"Default crime file not found: `{default_crime}`. Add it to the repo or upload below (uncheck Use repo defaults)."
+                    )
             if stops_path is None or crime_path is None:
                 stop_times_path = None
                 events_path = None
