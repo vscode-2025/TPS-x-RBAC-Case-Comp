@@ -27,36 +27,6 @@ from crime_around_stops import (
     make_map,
 )
 
-# Optional helper: some repo versions include an hourly chart feature.
-# Keep the import resilient so the app doesn't crash if the helper is missing.
-try:
-    from crime_around_stops import hourly_counts_by_stop  # type: ignore
-except Exception:
-    def hourly_counts_by_stop(df: pd.DataFrame, stop_id) -> pd.DataFrame:  # type: ignore
-        """
-        Fallback hourly counts (0-23) for a stop/station.
-        Uses `crime_dt` when available; returns zeros if inputs are missing.
-        """
-        if df is None or getattr(df, "empty", True):
-            return pd.DataFrame({"hour": range(24), "count": [0] * 24})
-        if "nearest_stop_id" not in df.columns:
-            return pd.DataFrame({"hour": range(24), "count": [0] * 24})
-        subset = df[df["nearest_stop_id"] == stop_id].copy()
-        if subset.empty:
-            return pd.DataFrame({"hour": range(24), "count": [0] * 24})
-        if "crime_dt" not in subset.columns:
-            return pd.DataFrame({"hour": range(24), "count": [0] * 24})
-        subset["hour"] = pd.to_datetime(subset["crime_dt"], errors="coerce").dt.hour.fillna(0).astype(int).clip(0, 23)
-        counts = subset.groupby("hour").size().reindex(range(24), fill_value=0).reset_index()
-        counts.columns = ["hour", "count"]
-        return counts
-
-from rolling_trend import build_trend_example_outputs, build_trend_snapshot
-from spike_detection import build_example_outputs, build_station_snapshot
-
-
-# Git LFS checks removed - directly use files
-
 
 # ----------------------------
 # Helpers
@@ -81,47 +51,13 @@ def _load_events_json(path: str | Path) -> tuple[set[pd.Timestamp], pd.DataFrame
     - a set of event dates (date only) for labeling crimes as event-day
     - a dataframe of point events with lat/lon (when present) for optional map overlay
     """
-    # Return empty data if path is invalid - never crash
-    if not path:
-        return set(), pd.DataFrame()
-    
-    try:
-        path_obj = Path(path)
-        if not path_obj.exists():
-            return set(), pd.DataFrame()
-        
-        # Check if file is empty
-        if path_obj.stat().st_size == 0:
-            return set(), pd.DataFrame()
-    except Exception:
-        # If we can't check the file, return empty data
+    if not path or not Path(path).exists():
         return set(), pd.DataFrame()
 
-    # Try to load and parse JSON with comprehensive error handling
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-            # Check if content is empty after stripping
-            if not content:
-                return set(), pd.DataFrame()
-            # Try to parse JSON
-            raw = json.loads(content)
-    except json.JSONDecodeError:
-        # Invalid JSON format - return empty data
-        return set(), pd.DataFrame()
-    except ValueError:
-        # Invalid value - return empty data
-        return set(), pd.DataFrame()
-    except Exception:
-        # Any other error (IOError, OSError, etc.) - return empty data
-        return set(), pd.DataFrame()
-    
-    try:
-        records = raw["value"] if isinstance(raw, dict) and "value" in raw else raw
-        events = pd.DataFrame(records)
-    except Exception:
-        # If data structure is invalid, return empty data
-        return set(), pd.DataFrame()
+    with open(path, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    records = raw["value"] if isinstance(raw, dict) and "value" in raw else raw
+    events = pd.DataFrame(records)
 
     if "event_dates" in events.columns:
         date_series = pd.json_normalize(events["event_dates"].explode())["date"]
@@ -176,22 +112,9 @@ def load_data(
     """Load, filter, link, and aggregate data for the visualization."""
     if stops_path is None or crime_path is None:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), set(), pd.DataFrame()
-    if not Path(stops_path).exists() or not Path(crime_path).exists():
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), set(), pd.DataFrame()
 
-    try:
-        stops = load_stops(stops_path)
-        crime = load_crime(crime_path)
-        
-        # Check if crime data is empty
-        if crime.empty:
-            # If file doesn't exist or other issue, return empty
-            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), set(), pd.DataFrame()
-    except Exception as e:
-        # Log error but don't crash - return empty data
-        import streamlit as st
-        st.error(f"Error loading data: {str(e)}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), set(), pd.DataFrame()
+    stops = load_stops(stops_path)
+    crime = load_crime(crime_path)
 
     # Date filtering: exact range if provided, otherwise years_back
     if start_date is not None or end_date is not None:
@@ -222,14 +145,7 @@ def load_data(
         )
 
     agg = aggregate(linked, freq=freq)
-    # Load events with error handling - never crash if JSON is invalid
-    event_days, event_points = set(), pd.DataFrame()
-    if events_path:
-        try:
-            event_days, event_points = _load_events_json(events_path)
-        except Exception:
-            # If anything goes wrong, just skip events - app continues without Event vs Normal Day feature
-            event_days, event_points = set(), pd.DataFrame()
+    event_days, event_points = _load_events_json(events_path) if events_path else (set(), pd.DataFrame())
     if event_days:
         linked["date"] = linked["crime_dt"].dt.date
         linked["label"] = np.where(linked["date"].isin(event_days), "Event day", "Normal day")
@@ -354,20 +270,13 @@ def render_map(
     event_daily_avg_lookup: dict[str, float] | None = None,
     normal_daily_avg_lookup: dict[str, float] | None = None,
     majority_type_lookup: dict[str, str] | None = None,
-    trend_color_lookup: dict[str, str] | None = None,
-    trend_text_lookup: dict[str, str] | None = None,
-    spike_color_lookup: dict[str, str] | None = None,
-    spike_blink_lookup: dict[str, bool] | None = None,
-    spike_text_lookup: dict[str, str] | None = None,
 ):
     if linked.empty or stops_for_map.empty:
         st.info("Load data to view the map.")
         return
-    # Backwards-compatible call: some versions of `crime_around_stops.make_map`
-    # don't accept the rolling-trend keyword args. Detect support at runtime.
-    import inspect
-
-    kwargs = dict(
+    fmap = make_map(
+        linked,
+        stops_for_map,
         freq=freq,
         radius_m=radius_m,
         risk_lookup=risk_lookup,
@@ -377,20 +286,6 @@ def render_map(
         normal_daily_avg_lookup=normal_daily_avg_lookup,
         majority_type_lookup=majority_type_lookup,
     )
-
-    sig = inspect.signature(make_map)
-    if "trend_color_lookup" in sig.parameters:
-        kwargs["trend_color_lookup"] = trend_color_lookup
-    if "trend_text_lookup" in sig.parameters:
-        kwargs["trend_text_lookup"] = trend_text_lookup
-    if "spike_color_lookup" in sig.parameters:
-        kwargs["spike_color_lookup"] = spike_color_lookup
-    if "spike_blink_lookup" in sig.parameters:
-        kwargs["spike_blink_lookup"] = spike_blink_lookup
-    if "spike_text_lookup" in sig.parameters:
-        kwargs["spike_text_lookup"] = spike_text_lookup
-
-    fmap = make_map(linked, stops_for_map, **kwargs)
     if event_points is not None and not event_points.empty:
         import folium
 
@@ -423,28 +318,17 @@ def main():
 
     default_stops = "Complete GTFS/stops.txt"
     default_stop_times = "data/processed/stop_times_with_stops.csv.gz"
-    # Prefer compressed file (smaller, can be committed to git)
-    # Check compressed version first, then uncompressed
-    if Path("data/Major_Crime_Indicators.csv.gz").exists():
-        default_crime = "data/Major_Crime_Indicators.csv.gz"
-    elif Path("Major_Crime_Indicators.csv.gz").exists():
-        default_crime = "Major_Crime_Indicators.csv.gz"
-    elif Path("Major_Crime_Indicators.csv").exists():
-        default_crime = "Major_Crime_Indicators.csv"
-    elif Path("data/Major_Crime_Indicators.csv").exists():
-        default_crime = "data/Major_Crime_Indicators.csv"
-    else:
-        default_crime = "data/Major_Crime_Indicators.csv.gz"  # Will show warning if missing
+    default_crime = "Major_Crime_Indicators.csv"
     default_events = "Festivals and events json feed.json"
 
     sidebar = st.sidebar
     with sidebar:
         st.header("Data sources")
-        # Always default to checked - user can uncheck if they want to upload files
         use_defaults = st.checkbox(
             "Use repo defaults",
-            value=True,
+            value=Path(default_stops).exists() and Path(default_crime).exists(),
             help="Use the included GTFS stops and TPS crime export.",
+            key="sidebar_use_repo_defaults",
         )
 
         stops_path = default_stops if use_defaults else None
@@ -452,48 +336,11 @@ def main():
         stop_times_path = default_stop_times if use_defaults else None
         events_path = default_events if use_defaults and Path(default_events).exists() else None
 
-        # If using defaults, ensure files exist (e.g. on Streamlit Cloud repo may not include data files)
-        if use_defaults:
-            # Check stops file
-            stops_exists = Path(default_stops).exists()
-            if not stops_exists:
-                stops_path = None
-                st.warning(
-                    f"Default stops file not found: `{default_stops}`. Add it to the repo or upload below (uncheck Use repo defaults)."
-                )
-            
-            # Check crime file - try multiple locations (compressed and uncompressed)
-            crime_exists = Path(default_crime).exists()
-            if not crime_exists:
-                # Try alternative locations in order of preference
-                alt_paths = [
-                    "data/Major_Crime_Indicators.csv.gz",
-                    "Major_Crime_Indicators.csv.gz",
-                    "data/Major_Crime_Indicators.csv",
-                    "Major_Crime_Indicators.csv",
-                ]
-                for alt_crime in alt_paths:
-                    if alt_crime != default_crime and Path(alt_crime).exists():
-                        crime_path = alt_crime
-                        crime_exists = True
-                        break
-                
-                if not crime_exists:
-                    crime_path = None
-                    st.warning(
-                        f"Default crime file not found. Expected one of: `data/Major_Crime_Indicators.csv.gz`, "
-                        f"`Major_Crime_Indicators.csv.gz`, `data/Major_Crime_Indicators.csv`, or `Major_Crime_Indicators.csv`. "
-                        "Add it to the repo or upload below (uncheck Use repo defaults)."
-                    )
-            if stops_path is None or crime_path is None:
-                stop_times_path = None
-                events_path = None
-
         if not use_defaults:
-            stops_file = st.file_uploader("stops.txt (CSV/TSV)", type=["csv", "txt", "tsv"])
-            crime_file = st.file_uploader("Crime CSV/TSV", type=["csv", "txt", "tsv"])
-            stop_times_file = st.file_uploader("stop_times (optional)", type=["csv", "txt", "tsv"])
-            events_file = st.file_uploader("Events JSON", type=["json"])
+            stops_file = st.file_uploader("stops.txt (CSV/TSV)", type=["csv", "txt", "tsv"], key="upload_stops")
+            crime_file = st.file_uploader("Crime CSV/TSV", type=["csv", "txt", "tsv"], key="upload_crime")
+            stop_times_file = st.file_uploader("stop_times (optional)", type=["csv", "txt", "tsv"], key="upload_stop_times")
+            events_file = st.file_uploader("Events JSON", type=["json"], key="upload_events")
 
             # Save uploaded files to temp buffers for loader compatibility
             if stops_file:
@@ -517,10 +364,10 @@ def main():
                 events_path = str(tmp)
 
         st.header("Filters")
-        radius_m = st.slider("Max distance to link crimes to a stop (m)", 50, 500, 250, step=25)
-        freq = st.radio("Aggregation", options=["M", "Y"], format_func=lambda x: "Monthly" if x == "M" else "Yearly")
-        years_back = st.slider("Years back from today", 1, 10, 1)
-        use_date_range = st.checkbox("Filter by exact date range", value=True)
+        radius_m = st.slider("Max distance to link crimes to a stop (m)", 50, 500, 250, step=25, key="filter_radius_m")
+        freq = st.radio("Aggregation", options=["M", "Y"], format_func=lambda x: "Monthly" if x == "M" else "Yearly", key="filter_freq")
+        years_back = st.slider("Years back from today", 1, 10, 1, key="filter_years_back")
+        use_date_range = st.checkbox("Filter by exact date range", value=True, key="filter_use_date_range")
         start_date = end_date = None
         if use_date_range:
             today = pd.Timestamp.today().normalize().date()
@@ -528,6 +375,7 @@ def main():
             date_sel = st.date_input(
                 "Date range (inclusive)",
                 value=(default_start, today),
+                key="filter_date_range",
             )
             if isinstance(date_sel, tuple) and len(date_sel) == 2:
                 start_date, end_date = date_sel
@@ -536,18 +384,12 @@ def main():
             else:
                 start_date = end_date = None
         st.subheader("Risk weights")
-        intensity_w = st.slider("Intensity weight", 0.0, 1.0, 0.5, 0.05)
-        severity_w = st.slider("Severity weight", 0.0, 1.0, 0.5, 0.05)
+        intensity_w = st.slider("Intensity weight", 0.0, 1.0, 0.7, 0.05, key="risk_intensity_w")
+        severity_w = st.slider("Severity weight", 0.0, 1.0, 0.3, 0.05, key="risk_severity_w")
         st.subheader("Division filter")
-        division_select = st.multiselect("Divisions", options=["14", "51", "52"], default=["14", "51", "52"])
+        division_select = st.multiselect("Divisions", options=["14", "51", "52"], default=["14", "51", "52"], key="filter_divisions")
         # placeholder for crime type selector (filled after data load)
         crime_type_placeholder = st.empty()
-        st.subheader("Rolling trend settings")
-        trend_reference_date = st.date_input(
-            "Trend reference date (end of window)",
-            value=pd.Timestamp.today().normalize().date(),
-            help="Rolling windows are computed as trailing 30/60 days ending on this date.",
-        )
 
     # Load once per parameter combo
     linked, agg, stops_for_map, event_days, event_points = load_data(
@@ -571,21 +413,13 @@ def main():
             break
     if crime_type_col:
         type_options = sorted(linked[crime_type_col].dropna().unique())
-        selected_types = crime_type_placeholder.multiselect("Crime types", options=type_options, default=type_options)
+        selected_types = crime_type_placeholder.multiselect("Crime types", options=type_options, default=type_options, key="filter_crime_types")
     else:
         selected_types = None
 
     if linked.empty:
         st.warning("No data loaded. Check file paths or upload required CSVs.")
         return
-
-    # Station selector options (filled after data load)
-    stop_options = (
-        linked["nearest_stop_id"].dropna().astype(str).unique().tolist()
-        if "nearest_stop_id" in linked.columns
-        else []
-    )
-    stop_options = sorted(stop_options)
 
     # Compute risk once so it can be shown on map and in tables
     risk_df = compute_risk_scores(
@@ -655,96 +489,6 @@ def main():
             if "Normal day" in label_avg.columns:
                 normal_daily_avg_lookup = dict(zip(label_avg.index.astype(str), label_avg["Normal day"].fillna(0).values))
 
-    # ----------------------------
-    # Spike detection (TPS 2-hour rule)
-    # ----------------------------
-    # Use a trailing two-hour window ending at a user-selected timestamp.
-    latest_crime_ts = linked["crime_dt"].max()
-    if pd.isna(latest_crime_ts):
-        latest_crime_ts = pd.Timestamp.now()
-    with st.sidebar:
-        st.subheader("Spike detection (2-hour TPS rule)")
-        spike_reference_input = st.datetime_input(
-            "Spike reference timestamp",
-            value=latest_crime_ts.to_pydatetime(),
-            help="End time for the trailing two-hour window.",
-        )
-        focus_stop_ids = st.multiselect(
-            "Focus stations (optional)",
-            options=stop_options,
-            default=[],
-            help="If empty, evaluate spike for all stations.",
-        )
-    spike_reference_ts = pd.Timestamp(spike_reference_input)
-    if spike_reference_ts.tzinfo is not None:
-        spike_reference_ts = spike_reference_ts.tz_convert(None)
-    focus_station_filter = set(focus_stop_ids) if focus_stop_ids else None
-
-    spike_payloads = build_station_snapshot(
-        linked,
-        as_of=spike_reference_ts,
-        station_col="nearest_stop_id",
-        ts_col="crime_dt",
-        station_filter=focus_station_filter,
-    )
-    spike_df = pd.DataFrame(spike_payloads)
-
-    # ----------------------------
-    # Rolling Trend Risk Analysis (30-day vs 60-day)
-    # ----------------------------
-    trend_as_of = pd.Timestamp(trend_reference_date).normalize()
-    # Use filtered + linked data (nearest_stop_id + crime_dt) as station_id/timestamp.
-    trend_payloads = build_trend_snapshot(
-        linked,
-        as_of=trend_as_of,
-        station_col="nearest_stop_id",
-        ts_col="crime_dt",
-    )
-    trend_df = pd.DataFrame(trend_payloads)
-    trend_color_lookup = None
-    trend_text_lookup = None
-    if not trend_df.empty:
-        trend_color_lookup = dict(
-            zip(
-                trend_df["station_id"].astype(str),
-                trend_df["map_flag"].apply(lambda flag: (flag or {}).get("color", "darkorange")),
-            )
-        )
-        trend_text_lookup = dict(zip(trend_df["station_id"].astype(str), trend_df["trendText"]))
-
-    # Spike detection map lookups: gray shades (dark = spike, light = no spike), blink, and short text for popup
-    spike_color_lookup = None
-    spike_blink_lookup = None
-    spike_text_lookup = None
-    if not spike_df.empty:
-        # Different shades of gray: dark = spike, light = no spike
-        spike_color_lookup = dict(
-            zip(
-                spike_df["station_id"].astype(str),
-                spike_df.apply(
-                    lambda r: "#37474f" if r["spike"] else "#90a4ae",
-                    axis=1,
-                ),
-            )
-        )
-        spike_blink_lookup = dict(
-            zip(
-                spike_df["station_id"].astype(str),
-                spike_df["ui_flag"].apply(lambda f: bool((f or {}).get("blink", False))),
-            )
-        )
-        spike_text_lookup = dict(
-            zip(
-                spike_df["station_id"].astype(str),
-                spike_df.apply(
-                    lambda r: f"+{r['percentageAbove']:.0f}% above baseline"
-                    if r["spike"]
-                    else "Within baseline",
-                    axis=1,
-                ),
-            )
-        )
-
     cols = st.columns([2, 1])
     with cols[0]:
         st.subheader("Map")
@@ -760,11 +504,6 @@ def main():
             event_daily_avg_lookup=event_daily_avg_lookup,
             normal_daily_avg_lookup=normal_daily_avg_lookup,
             majority_type_lookup=majority_type_lookup,
-            trend_color_lookup=trend_color_lookup,
-            trend_text_lookup=trend_text_lookup,
-            spike_color_lookup=spike_color_lookup,
-            spike_blink_lookup=spike_blink_lookup,
-            spike_text_lookup=spike_text_lookup,
         )
     with cols[1]:
         st.subheader("Summary")
@@ -774,7 +513,7 @@ def main():
             st.write("Crime counts by period and stop")
             st.dataframe(agg.head(1000))
             csv_bytes = agg.to_csv(index=False).encode("utf-8")
-            st.download_button("Download aggregated CSV", data=csv_bytes, file_name="crime_stop_agg.csv")
+            st.download_button("Download aggregated CSV", data=csv_bytes, file_name="crime_stop_agg.csv", key="dl_agg_csv")
         if event_days:
             st.write(f"Event days loaded: {len(event_days)}")
             st.write(f"Events with coordinates: {len(event_points)}")
@@ -824,7 +563,7 @@ def main():
 
         # Component breakdown for selected stop
         selected_stop = st.selectbox(
-            "Inspect components for stop", options=risk_df["stop_name"], index=0 if not risk_df.empty else None
+            "Inspect components for stop", options=risk_df["stop_name"], index=0 if not risk_df.empty else None, key="risk_selected_stop"
         )
         breakdown = risk_df[risk_df["stop_name"] == selected_stop].iloc[0]
         comp_df = pd.DataFrame(
@@ -853,229 +592,8 @@ def main():
             "Download risk scores CSV",
             data=risk_df.round(4).to_csv(index=False).encode("utf-8"),
             file_name="baseline_stop_risk.csv",
+            key="dl_risk_csv",
         )
-
-    st.subheader("Rolling Trend Risk Analysis (30-day vs 60-day)")
-    if trend_df.empty:
-        st.info("Not enough daily history to compute rolling trends with the current filters.")
-    else:
-        # Filter options
-        trend_filter_col1, trend_filter_col2 = st.columns([3, 1])
-        with trend_filter_col1:
-            trend_risk_filter = st.multiselect(
-                "Filter by trend risk",
-                options=["HIGH", "STABLE", "DECREASING"],
-                default=["HIGH", "STABLE", "DECREASING"],
-                help="Show only stations with selected trend classifications",
-            )
-        with trend_filter_col2:
-            show_trend_charts = st.checkbox("Show charts", value=True, key="trend_charts_checkbox")
-        
-        # Apply filter
-        if trend_risk_filter:
-            filtered_trend_df = trend_df[trend_df["expectedRisk"].isin(trend_risk_filter)].copy()
-        else:
-            filtered_trend_df = trend_df.copy()
-        
-        # KPIs
-        k1, k2, k3, k4 = st.columns(4)
-        high_count = int((trend_df["expectedRisk"] == "HIGH").sum())
-        stable_count = int((trend_df["expectedRisk"] == "STABLE").sum())
-        decreasing_count = int((trend_df["expectedRisk"] == "DECREASING").sum())
-        median_delta = trend_df["delta"].replace([float("inf")], np.nan).median()
-        k1.metric("HIGH trend stations", high_count)
-        k2.metric("Stable trend stations", stable_count)
-        k3.metric("Decreasing trend stations", decreasing_count)
-        k4.metric("Median delta", f"{median_delta:.2f}x" if pd.notna(median_delta) else "N/A")
-        st.caption("delta compares the 30-day rolling average to the 60-day baseline; >1 means short-term increase.")
-        
-        # Charts
-        if show_trend_charts and not filtered_trend_df.empty:
-            chart_col1, chart_col2 = st.columns(2)
-            
-            with chart_col1:
-                # Delta comparison chart
-                chart_df = filtered_trend_df.nlargest(20, "delta").copy()
-                chart_df["delta_clean"] = chart_df["delta"].replace([float("inf")], np.nan)
-                chart_df = chart_df[chart_df["delta_clean"].notna()]
-                if not chart_df.empty:
-                    delta_chart = (
-                        alt.Chart(chart_df)
-                        .mark_bar()
-                        .encode(
-                            x=alt.X("delta_clean:Q", title="Delta (30-day / 60-day)"),
-                            y=alt.Y("station_id:N", sort="-x", title="Station ID"),
-                            color=alt.Color("expectedRisk:N", title="Risk Level"),
-                            tooltip=["station_id", "rolling30", "rolling60", "delta", "expectedRisk"],
-                        )
-                        .properties(height=400, title="Top 20 Stations by Delta")
-                    )
-                    st.altair_chart(delta_chart, use_container_width=True)
-            
-            with chart_col2:
-                # 30-day vs 60-day comparison
-                comparison_df = filtered_trend_df.head(20).copy()
-                comparison_df = comparison_df.melt(
-                    id_vars=["station_id", "expectedRisk"],
-                    value_vars=["rolling30", "rolling60"],
-                    var_name="window",
-                    value_name="avg_crimes_per_day"
-                )
-                comparison_chart = (
-                    alt.Chart(comparison_df)
-                    .mark_bar()
-                    .encode(
-                        x=alt.X("window:N", title="Rolling Window"),
-                        y=alt.Y("avg_crimes_per_day:Q", title="Avg Crimes per Day"),
-                        color=alt.Color("expectedRisk:N", title="Risk Level"),
-                        column=alt.Column("station_id:N", title="Station", header=alt.Header(labelAngle=-45)),
-                        tooltip=["station_id", "window", "avg_crimes_per_day", "expectedRisk"],
-                    )
-                    .properties(width=50, height=150, title="30-day vs 60-day Comparison (Top 20)")
-                )
-                st.altair_chart(comparison_chart, use_container_width=True)
-        
-        # Data table
-        display_cols = [
-            "station_id",
-            "rolling30",
-            "rolling60",
-            "delta",
-            "expectedRisk",
-            "trendText",
-            "recommendation",
-            "map_flag",
-        ]
-        st.dataframe(filtered_trend_df[display_cols], use_container_width=True, hide_index=True)
-        
-        # Export button
-        csv_bytes = filtered_trend_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "Download rolling trend CSV",
-            data=csv_bytes,
-            file_name=f"rolling_trend_{trend_as_of.strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-        )
-
-    with st.expander("Rolling trend example payloads"):
-        st.json(build_trend_example_outputs())
-
-    st.subheader("Spike detection (2-hour TPS rule)")
-    if spike_df.empty:
-        st.info("No stations have crimes recorded inside the selected two-hour window.")
-    else:
-        # Filter and display options
-        spike_filter_col1, spike_filter_col2 = st.columns([3, 1])
-        with spike_filter_col1:
-            show_only_spikes = st.checkbox("Show only stations with spikes", value=False)
-        with spike_filter_col2:
-            show_spike_charts = st.checkbox("Show charts", value=True, key="spike_charts_checkbox")
-        
-        # Apply filter
-        display_spike_df = spike_df[spike_df["spike"]] if show_only_spikes else spike_df.copy()
-        
-        # Human-readable UI state for the table.
-        display_spike_df["ui_state"] = display_spike_df["ui_flag"].apply(
-            lambda f: f"{(f or {}).get('color', 'unknown')} / " + ("blink" if (f or {}).get("blink") else "steady")
-            if isinstance(f, dict)
-            else "unknown"
-        )
-
-        # KPIs
-        triggered = spike_df[spike_df["spike"]]
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Stations over threshold", int(len(triggered)))
-        k2.metric("Additional patrol units", int(triggered["recommended_units"].sum()))
-        max_percentage = spike_df["percentageAbove"].max() if not spike_df.empty else 0
-        avg_baseline = spike_df["baseline_2hr"].mean() if not spike_df.empty else 0
-        k3.metric("Max percentage above baseline", f"{max_percentage:.1f}%")
-        k4.metric("Avg baseline (2hr)", f"{avg_baseline:.2f}")
-        st.caption("Rule: spike triggers when recent_2hr > baseline_2hr * 1.3 (strict).")
-        
-        # Charts
-        if show_spike_charts and not display_spike_df.empty:
-            chart_col1, chart_col2 = st.columns(2)
-            
-            with chart_col1:
-                # Percentage above baseline chart
-                chart_df = display_spike_df.nlargest(20, "percentageAbove").copy()
-                chart_df["percentageAbove"] = chart_df["percentageAbove"].astype(float)
-                spike_chart = (
-                    alt.Chart(chart_df)
-                    .mark_bar()
-                    .encode(
-                        x=alt.X("percentageAbove:Q", title="Percentage Above Baseline (%)"),
-                        y=alt.Y("station_id:N", sort="-x", title="Station ID"),
-                        color=alt.Color(
-                            "spike:O",
-                            scale=alt.Scale(domain=[True, False], range=["#d32f2f", "#90a4ae"]),
-                            title="Spike Triggered"
-                        ),
-                        tooltip=["station_id", "baseline_2hr", "recent_2hr", "percentageAbove", "spike", "recommended_units"],
-                    )
-                    .properties(height=400, title="Top 20 Stations by Percentage Above Baseline")
-                )
-                st.altair_chart(spike_chart, use_container_width=True)
-            
-            with chart_col2:
-                # Baseline vs Recent comparison
-                comparison_df = display_spike_df.head(20).copy()
-                comparison_df = comparison_df.melt(
-                    id_vars=["station_id", "spike"],
-                    value_vars=["baseline_2hr", "recent_2hr"],
-                    var_name="metric",
-                    value_name="crime_count"
-                )
-                comparison_chart = (
-                    alt.Chart(comparison_df)
-                    .mark_bar()
-                    .encode(
-                        x=alt.X("metric:N", title="Metric"),
-                        y=alt.Y("crime_count:Q", title="Crime Count (2-hour window)"),
-                        color=alt.Color("spike:O", title="Spike Triggered"),
-                        column=alt.Column("station_id:N", title="Station", header=alt.Header(labelAngle=-45)),
-                        tooltip=["station_id", "metric", "crime_count", "spike"],
-                    )
-                    .properties(width=50, height=150, title="Baseline vs Recent (Top 20)")
-                )
-                st.altair_chart(comparison_chart, use_container_width=True)
-        
-        # Data table
-        display_cols = [
-            "station_id",
-            "baseline_2hr",
-            "recent_2hr",
-            "percentageAbove",
-            "spike",
-            "recommended_units",
-            "ui_state",
-        ]
-
-        # Make spikes visually obvious.
-        def _style_spike_rows(row: pd.Series):
-            if bool(row.get("spike")):
-                return ["background-color: #FFEBEE"] * len(row)
-            return [""] * len(row)
-
-        table = display_spike_df[display_cols].copy()
-        table["percentageAbove"] = table["percentageAbove"].astype(float)
-        st.dataframe(
-            table.style.apply(_style_spike_rows, axis=1),
-            use_container_width=True,
-            hide_index=True,
-        )
-        
-        # Export button
-        csv_bytes = display_spike_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "Download spike detection CSV",
-            data=csv_bytes,
-            file_name=f"spike_detection_{spike_reference_ts.strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv",
-        )
-
-    with st.expander("Spike payload examples"):
-        st.json(build_example_outputs())
 
     # ----------------------------
     # Event vs Normal Day Comparison
@@ -1163,13 +681,13 @@ def main():
             "Download event vs normal table",
             data=avg_display.rename(columns={"nearest_stop_name": "stop_name"}).round(4).to_csv(index=False).encode("utf-8"),
             file_name="event_vs_normal.csv",
+            key="dl_event_vs_normal_csv",
         )
     else:
-        # Show message when events data is not available
         st.subheader("Event vs Normal Day Comparison")
         st.info(
             "Event vs Normal Day comparison is not available because no events data was loaded. "
-            "To enable this feature, ensure the events JSON file (`Festivals and events json feed.json`) "
+            "To enable this feature, ensure the events JSON file (e.g. Festivals and events json feed.json) "
             "is available and contains valid event dates."
         )
 
