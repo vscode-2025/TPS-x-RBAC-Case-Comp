@@ -393,14 +393,18 @@ def main():
 
     default_stops = "Complete GTFS/stops.txt"
     default_stop_times = "data/processed/stop_times_with_stops.csv.gz"
-    # Check root first, then data/ folder (for Streamlit Cloud compatibility)
-    # Skip Git LFS pointer files - they can't be read on Streamlit Cloud
-    if _file_exists_and_not_lfs("Major_Crime_Indicators.csv"):
+    # Prefer compressed file (smaller, can be committed to git)
+    # Check compressed version first, then uncompressed, skip Git LFS pointers
+    if _file_exists_and_not_lfs("data/Major_Crime_Indicators.csv.gz"):
+        default_crime = "data/Major_Crime_Indicators.csv.gz"
+    elif _file_exists_and_not_lfs("Major_Crime_Indicators.csv.gz"):
+        default_crime = "Major_Crime_Indicators.csv.gz"
+    elif _file_exists_and_not_lfs("Major_Crime_Indicators.csv"):
         default_crime = "Major_Crime_Indicators.csv"
     elif _file_exists_and_not_lfs("data/Major_Crime_Indicators.csv"):
         default_crime = "data/Major_Crime_Indicators.csv"
     else:
-        default_crime = "data/Major_Crime_Indicators.csv"  # Will show warning if LFS or missing
+        default_crime = "data/Major_Crime_Indicators.csv.gz"  # Will show warning if missing
     default_events = "Festivals and events json feed.json"
 
     sidebar = st.sidebar
@@ -428,30 +432,41 @@ def main():
                     f"Default stops file not found: `{default_stops}`. Add it to the repo or upload below (uncheck Use repo defaults)."
                 )
             
-            # Check crime file - try both locations, but skip Git LFS pointers
+            # Check crime file - try multiple locations (compressed and uncompressed), skip Git LFS pointers
             crime_exists = _file_exists_and_not_lfs(default_crime)
             if not crime_exists:
-                # Try the alternative location
-                alt_crime = "data/Major_Crime_Indicators.csv" if default_crime == "Major_Crime_Indicators.csv" else "Major_Crime_Indicators.csv"
-                if _file_exists_and_not_lfs(alt_crime):
-                    crime_path = alt_crime
-                    crime_exists = True
-                else:
+                # Try alternative locations in order of preference
+                alt_paths = [
+                    "data/Major_Crime_Indicators.csv.gz",
+                    "Major_Crime_Indicators.csv.gz",
+                    "data/Major_Crime_Indicators.csv",
+                    "Major_Crime_Indicators.csv",
+                ]
+                for alt_crime in alt_paths:
+                    if alt_crime != default_crime and _file_exists_and_not_lfs(alt_crime):
+                        crime_path = alt_crime
+                        crime_exists = True
+                        break
+                
+                if not crime_exists:
                     crime_path = None
-                    # Check if it's an LFS pointer to give a more helpful message
-                    if Path(default_crime).exists() and _is_git_lfs_pointer(Path(default_crime)):
+                    # Check if any path exists but is an LFS pointer
+                    checked_paths = [default_crime] + alt_paths
+                    lfs_found = False
+                    for check_path in checked_paths:
+                        if Path(check_path).exists() and _is_git_lfs_pointer(Path(check_path)):
+                            st.warning(
+                                f"Default crime file `{check_path}` is stored in Git LFS and cannot be read on Streamlit Cloud. "
+                                "Please upload the CSV file directly using the file uploader below (uncheck Use repo defaults)."
+                            )
+                            lfs_found = True
+                            break
+                    
+                    if not lfs_found:
                         st.warning(
-                            f"Default crime file `{default_crime}` is stored in Git LFS and cannot be read on Streamlit Cloud. "
-                            "Please upload the CSV file directly using the file uploader below (uncheck Use repo defaults)."
-                        )
-                    elif Path(alt_crime).exists() and _is_git_lfs_pointer(Path(alt_crime)):
-                        st.warning(
-                            f"Default crime file `{alt_crime}` is stored in Git LFS and cannot be read on Streamlit Cloud. "
-                            "Please upload the CSV file directly using the file uploader below (uncheck Use repo defaults)."
-                        )
-                    else:
-                        st.warning(
-                            f"Default crime file not found: `{default_crime}`. Add it to the repo or upload below (uncheck Use repo defaults)."
+                            f"Default crime file not found. Expected one of: `data/Major_Crime_Indicators.csv.gz`, "
+                            f"`Major_Crime_Indicators.csv.gz`, `data/Major_Crime_Indicators.csv`, or `Major_Crime_Indicators.csv`. "
+                            "Add it to the repo or upload below (uncheck Use repo defaults)."
                         )
             if stops_path is None or crime_path is None:
                 stop_times_path = None
